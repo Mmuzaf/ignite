@@ -4,6 +4,7 @@
 
 <a href="https://ci.ignite.apache.org/viewType.html?buildTypeId=Ignite20Tests_RunAll&branch_Ignite20Tests=%3Cdefault%3E"><img src="http://ci.ignite.apache.org/app/rest/builds/buildType:(id:Ignite20Tests_RunAll)/statusIcon.svg"/></a>
 
+[![Build Status](https://travis-ci.com/Mmuzaf/ignite.svg?branch=master)](https://travis-ci.com/Mmuzaf/ignite)
 
 ## Getting Started
 
