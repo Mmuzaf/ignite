@@ -15,7 +15,7 @@ sudo: false
 script: "mvn cobertura:cobertura -P test"
 
 after_success:
-  - bash <(curl -s https://codecov.io/bash)
+  - bash <(curl -s https://codecov.io/bash) -t 6c7e8599-8bb3-40db-bbb6-02f533e0acd1
 
 jdk:
   - oraclejdk8
