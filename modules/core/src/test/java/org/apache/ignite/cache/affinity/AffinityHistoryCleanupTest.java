@@ -22,6 +22,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteSystemProperties;
+import org.apache.ignite.cache.CacheMode;
+import org.apache.ignite.cache.CacheRebalanceMode;
 import org.apache.ignite.cache.affinity.rendezvous.RendezvousAffinityFunction;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
@@ -76,6 +78,41 @@ public class AffinityHistoryCleanupTest extends GridCommonAbstractTest {
         stopAllGrids();
 
         super.afterTest();
+    }
+
+    /**
+     * @throws Exception If failed.
+     */
+    public void testAffinityHistoryAfterRestart() throws Exception {
+        Ignite ig0 = startGrid(0);
+
+        startGrid(1);
+
+        stopGrid(1);
+
+        checkHistory(ig0, F.asList(
+            topVer(1, 0),
+            topVer(2, 0),
+            topVer(3, 0)),
+            3);
+
+        ig0.createCache(
+            new CacheConfiguration<Integer, Integer>("cacheP")
+                .setCacheMode(CacheMode.PARTITIONED)
+                .setRebalanceMode(CacheRebalanceMode.ASYNC));
+
+        // Processing cache group [grp=static-cache-3]
+        // Processing cache group [grp=static-cache-2]
+        // Processing cache group [grp=static-cache-1]
+        // Processing cache group [grp=static-cache-0]
+        // Processing cache group [grp=cacheP] -- AssertionError on newly started cache group!
+
+        checkHistory(ig0, F.asList(
+            topVer(1, 0),
+            topVer(2, 0),
+            topVer(3, 0),
+            topVer(3, 1)),
+            4);
     }
 
     /**
@@ -191,6 +228,8 @@ public class AffinityHistoryCleanupTest extends GridCommonAbstractTest {
         int cnt = 0;
 
         for (GridCacheContext cctx : proc.context().cacheContexts()) {
+            log.info(">>> Processing cache group [grp=" + cctx.config().getName() + "]");
+
             GridAffinityAssignmentCache aff = GridTestUtils.getFieldValue(cctx.affinity(), "aff");
 
             AtomicInteger fullHistSize = GridTestUtils.getFieldValue(aff, "fullHistSize");
