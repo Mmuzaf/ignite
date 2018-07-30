@@ -16,16 +16,39 @@
  */
 package org.apache.ignite.internal.processors.cache.persistence.baseline;
 
+import java.io.Serializable;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.cache.CacheAtomicityMode;
 import org.apache.ignite.cache.CacheWriteSynchronizationMode;
 import org.apache.ignite.cache.affinity.rendezvous.RendezvousAffinityFunction;
 import org.apache.ignite.cluster.BaselineNode;
+import org.apache.ignite.cluster.ClusterNode;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.DataRegionConfiguration;
 import org.apache.ignite.configuration.DataStorageConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
+import org.apache.ignite.configuration.WALMode;
+import org.apache.ignite.internal.GridKernalContext;
+import org.apache.ignite.internal.IgniteEx;
+import org.apache.ignite.internal.pagemem.wal.IgniteWriteAheadLogManager;
+import org.apache.ignite.internal.pagemem.wal.StorageException;
+import org.apache.ignite.internal.pagemem.wal.WALIterator;
+import org.apache.ignite.internal.pagemem.wal.WALPointer;
+import org.apache.ignite.internal.processors.cache.persistence.wal.FileWriteAheadLogManager;
+import org.apache.ignite.internal.processors.cluster.IgniteChangeGlobalStateSupport;
+import org.apache.ignite.plugin.CachePluginContext;
+import org.apache.ignite.plugin.CachePluginProvider;
+import org.apache.ignite.plugin.ExtensionRegistry;
+import org.apache.ignite.plugin.IgnitePlugin;
+import org.apache.ignite.plugin.PluginConfiguration;
+import org.apache.ignite.plugin.PluginContext;
+import org.apache.ignite.plugin.PluginProvider;
+import org.apache.ignite.plugin.PluginValidationException;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
+import org.jetbrains.annotations.Nullable;
 
 /** */
 public class IgniteBaselineRestoreMemoryBeforePMETest extends GridCommonAbstractTest {
@@ -37,6 +60,9 @@ public class IgniteBaselineRestoreMemoryBeforePMETest extends GridCommonAbstract
 
     /** Entries. */
     private static final int ENTRIES = 3_000;
+
+    /** */
+    private static boolean slow = false;
 
     /** */
     @Override protected IgniteConfiguration getConfiguration(String igniteInstanceName) throws Exception {
@@ -89,7 +115,7 @@ public class IgniteBaselineRestoreMemoryBeforePMETest extends GridCommonAbstract
                 .put(r.nextInt(ENTRIES), new String(randBytes));
         }
 
-        waitForRebalancing();
+        awaitPartitionMapExchange();
 
         stopGrid(0);
 
@@ -103,8 +129,125 @@ public class IgniteBaselineRestoreMemoryBeforePMETest extends GridCommonAbstract
             .map(BaselineNode::consistentId)
             .forEach(System.out::println);
 
-        startGrid(0);
+        slow = true;
+
+        IgniteEx ig0 = startGrid(0);
+
+        slow = false;
+
+        IgniteWriteAheadLogManager wal = ig0.context().cache().context().wal();
 
         awaitPartitionMapExchange();
     }
+
+    /** */
+    public static class FileWriteAheadLogManagerProvider implements PluginProvider, IgnitePlugin, IgniteChangeGlobalStateSupport {
+        /** */
+        private IgniteLogger log;
+
+        /** {@inheritDoc} */
+        @Override public String name() {
+            return "Wal Plugin";
+        }
+
+        /** {@inheritDoc} */
+        @Override public String version() {
+            return "1.0";
+        }
+
+        /** {@inheritDoc} */
+        @Override public String copyright() {
+            return "Apache Ignite (c)";
+        }
+
+        /** {@inheritDoc} */
+        @Override public IgnitePlugin plugin() {
+            return this;
+        }
+
+        /** {@inheritDoc} */
+        @Override public void initExtensions(PluginContext ctx,
+            ExtensionRegistry registry) throws IgniteCheckedException {
+            log = ctx.log(getClass());
+        }
+
+        /** {@inheritDoc} */
+        @Nullable @Override public Object createComponent(PluginContext ctx, Class cls) {
+            if (IgniteWriteAheadLogManager.class.equals(cls)) {
+                assert ctx.igniteConfiguration().getDataStorageConfiguration().getWalMode() != WALMode.FSYNC;
+
+                return new FileWriteAheadLogManager(((IgniteEx)ctx.grid()).context()) {
+                    /** {@inheritDoc} */
+                    @Override public WALIterator replay(
+                        WALPointer start) throws IgniteCheckedException, StorageException {
+                        FileWriteAheadLogManagerProvider.this.log.info("FileWriteAheadLogManager Plugin");
+
+                        try {
+                            if (slow)
+                                Thread.sleep(20_000);
+                        }
+                        catch (InterruptedException e) {
+                            throw new IgniteCheckedException(e);
+                        }
+
+                        return super.replay(start);
+                    }
+                };
+            }
+
+            return null;
+        }
+
+        /** {@inheritDoc} */
+        @Override public CachePluginProvider createCacheProvider(CachePluginContext ctx) {
+            return null;
+        }
+
+        /** {@inheritDoc} */
+        @Override public void start(PluginContext ctx) throws IgniteCheckedException {
+            // No-op.
+        }
+
+        /** {@inheritDoc} */
+        @Override public void stop(boolean cancel) throws IgniteCheckedException {
+            // No-op.
+        }
+
+        /** {@inheritDoc} */
+        @Override public void onIgniteStart() throws IgniteCheckedException {
+            // No-op.
+        }
+
+        /** {@inheritDoc} */
+        @Override public void onIgniteStop(boolean cancel) {
+            // No-op.
+        }
+
+        /** {@inheritDoc} */
+        @Nullable @Override public Serializable provideDiscoveryData(UUID nodeId) {
+            return null;
+        }
+
+        /** {@inheritDoc} */
+        @Override public void receiveDiscoveryData(UUID nodeId, Serializable data) {
+            // No-op.
+        }
+
+        /** {@inheritDoc} */
+        @Override public void validateNewNode(ClusterNode node) throws PluginValidationException {
+            // No-op.
+        }
+
+        /** {@inheritDoc} */
+        @Override public void onActivate(GridKernalContext kctx) throws IgniteCheckedException {
+            // No-op.
+        }
+
+        /** {@inheritDoc} */
+        @Override public void onDeActivate(GridKernalContext kctx) {
+            //No-op.
+        }
+    }
+
+
 }
