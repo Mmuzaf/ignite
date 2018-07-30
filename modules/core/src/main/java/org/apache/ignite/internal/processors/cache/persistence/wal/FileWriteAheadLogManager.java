@@ -2626,7 +2626,7 @@ public class FileWriteAheadLogManager extends GridCacheSharedManagerAdapter impl
 
                         ByteBuffer buf = seg.buffer();
 
-                        if (buf == null || (stop.get() && rec.type() != SWITCH_SEGMENT_RECORD))
+                        if (buf == null)
                             return null; // Can not write to this segment, need to switch to the next one.
 
                         ptr = new FileWALPointer(idx, pos, rec.size());
@@ -3047,7 +3047,9 @@ public class FileWriteAheadLogManager extends GridCacheSharedManagerAdapter impl
             @NotNull AbstractFileDescriptor desc,
             @Nullable FileWALPointer start
         ) throws IgniteCheckedException, FileNotFoundException {
-            if (decompressor != null && !desc.file().exists()) {
+            AbstractFileDescriptor currDesc = desc;
+
+            if (!desc.file().exists()) {
                 FileDescriptor zipFile = new FileDescriptor(
                     new File(walArchiveDir, FileDescriptor.fileName(desc.idx()) + ".zip"));
 
@@ -3056,10 +3058,13 @@ public class FileWriteAheadLogManager extends GridCacheSharedManagerAdapter impl
                         "[segmentIdx=" + desc.idx() + "]");
                 }
 
-                decompressor.decompressFile(desc.idx()).get();
+                if (decompressor != null)
+                    decompressor.decompressFile(desc.idx()).get();
+                else
+                    currDesc = zipFile;
             }
 
-            return (ReadFileHandle) super.initReadHandle(desc, start);
+            return (ReadFileHandle) super.initReadHandle(currDesc, start);
         }
 
         /** {@inheritDoc} */
