@@ -39,11 +39,11 @@ import org.apache.ignite.internal.pagemem.wal.WALIterator;
 import org.apache.ignite.internal.pagemem.wal.WALPointer;
 import org.apache.ignite.internal.processors.cache.persistence.wal.FileWriteAheadLogManager;
 import org.apache.ignite.internal.processors.cluster.IgniteChangeGlobalStateSupport;
+import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.plugin.CachePluginContext;
 import org.apache.ignite.plugin.CachePluginProvider;
 import org.apache.ignite.plugin.ExtensionRegistry;
 import org.apache.ignite.plugin.IgnitePlugin;
-import org.apache.ignite.plugin.PluginConfiguration;
 import org.apache.ignite.plugin.PluginContext;
 import org.apache.ignite.plugin.PluginProvider;
 import org.apache.ignite.plugin.PluginValidationException;
@@ -129,6 +129,8 @@ public class IgniteBaselineRestoreMemoryBeforePMETest extends GridCommonAbstract
             .map(BaselineNode::consistentId)
             .forEach(System.out::println);
 
+        log.info("Start slowing FWAL");
+
         slow = true;
 
         IgniteEx ig0 = startGrid(0);
@@ -182,13 +184,8 @@ public class IgniteBaselineRestoreMemoryBeforePMETest extends GridCommonAbstract
                         WALPointer start) throws IgniteCheckedException, StorageException {
                         FileWriteAheadLogManagerProvider.this.log.info("FileWriteAheadLogManager Plugin");
 
-                        try {
-                            if (slow)
-                                Thread.sleep(20_000);
-                        }
-                        catch (InterruptedException e) {
-                            throw new IgniteCheckedException(e);
-                        }
+                        if (slow)
+                            U.sleep(10_000);
 
                         return super.replay(start);
                     }
