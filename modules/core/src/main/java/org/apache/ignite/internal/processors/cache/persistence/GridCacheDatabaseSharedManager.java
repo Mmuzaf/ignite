@@ -122,6 +122,8 @@ import org.apache.ignite.internal.processors.cache.persistence.file.FilePageStor
 import org.apache.ignite.internal.processors.cache.persistence.file.PersistentStorageIOException;
 import org.apache.ignite.internal.processors.cache.persistence.metastorage.MetaStorage;
 import org.apache.ignite.internal.processors.cache.persistence.metastorage.MetastorageLifecycleListener;
+import org.apache.ignite.internal.processors.cache.persistence.metastorage.MetastorageLifecycleListenerAdapter;
+import org.apache.ignite.internal.processors.cache.persistence.metastorage.ReadOnlyMetastorage;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.CheckpointMetricsTracker;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryEx;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryImpl;
@@ -133,6 +135,7 @@ import org.apache.ignite.internal.processors.cache.persistence.tree.io.PageParti
 import org.apache.ignite.internal.processors.cache.persistence.wal.FileWALPointer;
 import org.apache.ignite.internal.processors.cache.persistence.wal.crc.IgniteDataIntegrityViolationException;
 import org.apache.ignite.internal.processors.cache.persistence.wal.crc.PureJavaCrc32;
+import org.apache.ignite.internal.processors.cluster.BaselineTopology;
 import org.apache.ignite.internal.processors.port.GridPortRecord;
 import org.apache.ignite.internal.util.GridMultiCollectionWrapper;
 import org.apache.ignite.internal.util.GridUnsafe;
@@ -169,6 +172,7 @@ import static org.apache.ignite.failure.FailureType.CRITICAL_ERROR;
 import static org.apache.ignite.failure.FailureType.SYSTEM_WORKER_TERMINATION;
 import static org.apache.ignite.internal.pagemem.wal.record.WALRecord.RecordType.CHECKPOINT_RECORD;
 import static org.apache.ignite.internal.processors.cache.persistence.metastorage.MetaStorage.METASTORAGE_CACHE_ID;
+import static org.apache.ignite.internal.processors.cluster.GridClusterStateProcessor.METASTORE_CURR_BLT_KEY;
 
 /**
  *
@@ -335,7 +339,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
     /** Number of pages in current checkpoint at the beginning of checkpoint. */
     private volatile int currCheckpointPagesCnt;
 
-    /** */
+    /** MetaStorage instance. {@code null} if storage not initialized yet. */
     private MetaStorage metaStorage;
 
     /** */
@@ -377,9 +381,9 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
     }
 
     /** */
-    private void notifyMetastorageReadyForRead() throws IgniteCheckedException {
+    private void notifyMetastorageReadyForRead(final MetaStorage strg) throws IgniteCheckedException {
         for (MetastorageLifecycleListener lsnr : metastorageLifecycleLsnrs)
-            lsnr.onReadyForRead(metaStorage);
+            lsnr.onReadyForRead(strg);
     }
 
     /** */
@@ -483,7 +487,33 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
             persStoreMetrics.wal(cctx.wal());
 
-            // Here we can get data from metastorage
+            // Restore binary state on join local node to BLT if need.
+            cctx.kernalContext().internalSubscriptionProcessor()
+                .registerMetastorageListener(
+                    new MetastorageLifecycleListenerAdapter() {
+                        /** {@inheritDoc} */
+                        @Override public void onReadyForRead(
+                            ReadOnlyMetastorage strg
+                        ) throws IgniteCheckedException {
+                            BaselineTopology blt = (BaselineTopology)strg.read(METASTORE_CURR_BLT_KEY);
+
+                            if (blt != null) {
+                                U.log(log, "Restoring binary state for node joined to BaselineTopology " +
+                                    "[bltId=" + blt.id() +
+                                    ", nodeId=" + cctx.kernalContext().localNodeId() + ']');
+
+                                // Preform early regions startup before restoring state.
+                                initAndStartRegions(cctx.kernalContext().config().getDataStorageConfiguration());
+
+                                CheckpointStatus status = readCheckpointStatus();
+
+                                initMetaStorageAndRestoreMemory(status);
+                            }
+                        }
+                    }
+                );
+
+            // Read data from MetaStorage for early #onReadyForRead notification.
             readMetastore();
         }
     }
@@ -628,28 +658,22 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
             storePageMem.start();
 
-            checkpointReadLock();
-
             try {
                 restoreMemory(status, true, storePageMem);
 
-                metaStorage = new MetaStorage(cctx, regCfg, memMetrics, true);
+                MetaStorage strg = new MetaStorage(cctx, regCfg, memMetrics, true);
 
-                metaStorage.init(this);
+                strg.init(this);
 
-                applyLastUpdates(status, true);
+                applyLastUpdates(status, true, strg);
 
-                fillWalDisabledGroups();
+                fillWalDisabledGroups(strg);
 
-                notifyMetastorageReadyForRead();
+                notifyMetastorageReadyForRead(strg);
             }
             finally {
-                checkpointReadUnlock();
+                storePageMem.stop();
             }
-
-            metaStorage = null;
-
-            storePageMem.stop();
         }
         catch (StorageException e) {
             cctx.kernalContext().failure().process(new FailureContext(FailureType.CRITICAL_ERROR, e));
@@ -720,6 +744,13 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             if (fileLockHolder != null)
                 fileLockHolder = new FileLockHolder(storeMgr.workDir().getPath(), cctx.kernalContext(), log);
         }
+    }
+
+    /** {@inheritDoc} */
+    @Override protected void stop0(boolean cancel) {
+        super.stop0(cancel);
+
+        metaStorage = null;
     }
 
     /**
@@ -820,36 +851,13 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                 }
             }
 
+            // Storage already initialized and binary state restored.
+            if (metaStorage != null)
+                return;
+
             CheckpointStatus status = readCheckpointStatus();
 
-            cctx.pageStore().initializeForMetastorage();
-
-            metaStorage = new MetaStorage(
-                cctx,
-                dataRegionMap.get(METASTORE_DATA_REGION_NAME),
-                (DataRegionMetricsImpl)memMetricsMap.get(METASTORE_DATA_REGION_NAME)
-            );
-
-            WALPointer restore = restoreMemory(status);
-
-            if (restore == null && !status.endPtr.equals(CheckpointStatus.NULL_PTR)) {
-                throw new StorageException("Restore wal pointer = " + restore + ", while status.endPtr = " +
-                    status.endPtr + ". Can't restore memory - critical part of WAL archive is missing.");
-            }
-
-            // First, bring memory to the last consistent checkpoint state if needed.
-            // This method should return a pointer to the last valid record in the WAL.
-            cctx.wal().resumeLogging(restore);
-
-            WALPointer ptr = cctx.wal().log(new MemoryRecoveryRecord(U.currentTimeMillis()));
-
-            if (ptr != null) {
-                cctx.wal().flush(ptr, true);
-
-                nodeStart(ptr);
-            }
-
-            metaStorage.init(this);
+            initMetaStorageAndRestoreMemory(status);
 
             notifyMetastorageReadyForReadWrite();
         }
@@ -862,6 +870,40 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
         finally {
             checkpointReadUnlock();
         }
+    }
+
+    /**
+     * Initialize {@link MetaStorage} and resore binary memory state.
+     */
+    private void initMetaStorageAndRestoreMemory(CheckpointStatus status) throws IgniteCheckedException {
+        cctx.pageStore().initializeForMetastorage();
+
+        metaStorage = new MetaStorage(
+            cctx,
+            dataRegionMap.get(METASTORE_DATA_REGION_NAME),
+            (DataRegionMetricsImpl)memMetricsMap.get(METASTORE_DATA_REGION_NAME)
+        );
+
+        WALPointer restore = restoreMemory(status, false, (PageMemoryEx)metaStorage.pageMemory());
+
+        if (restore == null && !status.endPtr.equals(CheckpointStatus.NULL_PTR)) {
+            throw new StorageException("Restore wal pointer = " + restore + ", while status.endPtr = " +
+                status.endPtr + ". Can't restore memory - critical part of WAL archive is missing.");
+        }
+
+        // First, bring memory to the last consistent checkpoint state if needed.
+        // This method should return a pointer to the last valid record in the WAL.
+        cctx.wal().resumeLogging(restore);
+
+        WALPointer ptr = cctx.wal().log(new MemoryRecoveryRecord(U.currentTimeMillis()));
+
+        if (ptr != null) {
+            cctx.wal().flush(ptr, true);
+
+            nodeStart(ptr);
+        }
+
+        metaStorage.init(this);
     }
 
     /**
@@ -1569,7 +1611,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             checkpointReadLock();
 
             try {
-                applyLastUpdates(status, false);
+                applyLastUpdates(status, false, metaStorage);
             }
             finally {
                 checkpointReadUnlock();
@@ -1895,15 +1937,6 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
     /**
      * @param status Checkpoint status.
-     * @throws IgniteCheckedException If failed.
-     * @throws StorageException In case I/O error occurred during operations with storage.
-     */
-    @Nullable private WALPointer restoreMemory(CheckpointStatus status) throws IgniteCheckedException {
-        return restoreMemory(status, false, (PageMemoryEx)metaStorage.pageMemory());
-    }
-
-    /**
-     * @param status Checkpoint status.
      * @param metastoreOnly If {@code True} restores Metastorage only.
      * @param storePageMem Metastore page memory.
      * @throws IgniteCheckedException If failed.
@@ -2201,10 +2234,16 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
      * @throws IgniteCheckedException If failed to apply updates.
      * @throws StorageException If IO exception occurred while reading write-ahead log.
      */
-    private void applyLastUpdates(CheckpointStatus status, boolean metastoreOnly) throws IgniteCheckedException {
+    private void applyLastUpdates(
+        CheckpointStatus status,
+        boolean metastoreOnly,
+        MetaStorage strg
+    ) throws IgniteCheckedException {
         if (log.isInfoEnabled())
             log.info("Applying lost cache updates since last checkpoint record [lastMarked="
                 + status.startPtr + ", lastCheckpointId=" + status.cpStartId + ']');
+
+        assert strg != null : "MetaStorage not initialized";
 
         if (!metastoreOnly)
             cctx.kernalContext().query().skipFieldLookup(true);
@@ -2267,7 +2306,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                     case METASTORE_DATA_RECORD:
                         MetastoreDataRecord metastoreDataRecord = (MetastoreDataRecord)rec;
 
-                        metaStorage.applyUpdate(metastoreDataRecord.key(), metastoreDataRecord.value());
+                        strg.applyUpdate(metastoreDataRecord.key(), metastoreDataRecord.value());
 
                         break;
 
@@ -4285,6 +4324,9 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
     /** {@inheritDoc} */
     @Override public MetaStorage metaStorage() {
+        if (metaStorage == null)
+            throw new IgniteException("MetaStorage not initialized");
+
         return metaStorage;
     }
 
@@ -4355,14 +4397,10 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
         }
     }
 
-    /**
-     *
-     */
-    private void fillWalDisabledGroups() {
-        MetaStorage meta = cctx.database().metaStorage();
-
+    /** */
+    private void fillWalDisabledGroups(MetaStorage strg) {
         try {
-            Set<String> keys = meta.readForPredicate(WAL_KEY_PREFIX_PRED).keySet();
+            Set<String> keys = strg.readForPredicate(WAL_KEY_PREFIX_PRED).keySet();
 
             if (keys.isEmpty())
                 return;

@@ -91,6 +91,9 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
     private volatile boolean dataRegionsInitialized;
 
     /** */
+    private volatile boolean dataRegionsStarted;
+
+    /** */
     protected Map<String, DataRegionMetrics> memMetricsMap;
 
     /** */
@@ -204,14 +207,12 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
         return pageSize;
     }
 
-    /**
-     *
-     */
-    private void startMemoryPolicies() {
-        for (DataRegion memPlc : dataRegionMap.values()) {
-            memPlc.pageMemory().start();
+    /** */
+    private void startDataRegions() {
+        for (DataRegion region : dataRegionMap.values()) {
+            region.pageMemory().start();
 
-            memPlc.evictionTracker().start();
+            region.evictionTracker().start();
         }
     }
 
@@ -674,6 +675,8 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
 
             dataRegionsInitialized = false;
         }
+
+        dataRegionsStarted = false;
     }
 
     /**
@@ -1056,17 +1059,26 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
         if (cctx.kernalContext().clientNode() && cctx.kernalContext().config().getDataStorageConfiguration() == null)
             return;
 
-        DataStorageConfiguration memCfg = cctx.kernalContext().config().getDataStorageConfiguration();
+        initAndStartRegions(cctx.kernalContext().config().getDataStorageConfiguration());
+    }
 
-        assert memCfg != null;
+    /**
+     * Initialize and start CacheDatabaseSharedManager data regions.
+     */
+    protected void initAndStartRegions(DataStorageConfiguration cfg) throws IgniteCheckedException {
+        assert cfg != null;
 
-        initDataRegions(memCfg);
+        if (!dataRegionsStarted) {
+            initDataRegions(cfg);
 
-        registerMetricsMBeans();
+            registerMetricsMBeans();
 
-        startMemoryPolicies();
+            startDataRegions();
 
-        initPageMemoryDataStructures(memCfg);
+            initPageMemoryDataStructures(cfg);
+
+            dataRegionsStarted = true;
+        }
     }
 
     /** {@inheritDoc} */
