@@ -208,11 +208,11 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
     }
 
     /** */
-    private void startDataRegions() {
-        for (DataRegion region : dataRegionMap.values()) {
-            region.pageMemory().start();
+    private void startMemoryPolicies() {
+        for (DataRegion memPlc : dataRegionMap.values()) {
+            memPlc.pageMemory().start();
 
-            region.evictionTracker().start();
+            memPlc.evictionTracker().start();
         }
     }
 
@@ -1043,7 +1043,7 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
 
             registerMetricsMBeans();
 
-            startDataRegions();
+            startMemoryPolicies();
 
             initPageMemoryDataStructures(cfg);
 
