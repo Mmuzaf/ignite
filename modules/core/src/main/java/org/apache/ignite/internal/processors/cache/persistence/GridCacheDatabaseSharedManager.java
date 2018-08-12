@@ -1918,14 +1918,10 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                 // Preform early regions startup before restoring state.
                 initAndStartRegions(cfg);
 
-                if (!F.isEmpty(caches)) {
-                    for (DynamicCacheDescriptor desc : caches) {
-                        if (isPersistentCache(desc.cacheConfiguration(), cfg)) {
-                            storeMgr.initializeForCache(
-                                desc.groupDescriptor(),
-                                new StoredCacheData(desc.cacheConfiguration())
-                            );
-                        }
+                for (DynamicCacheDescriptor desc : caches) {
+                    if (isPersistentCache(desc.cacheConfiguration(), cfg)) {
+                        storeMgr.initializeForCache(desc.groupDescriptor(),
+                            new StoredCacheData(desc.cacheConfiguration()));
                     }
                 }
 
