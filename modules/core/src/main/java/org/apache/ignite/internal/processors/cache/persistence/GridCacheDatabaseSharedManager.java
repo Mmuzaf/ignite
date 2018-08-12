@@ -1903,7 +1903,8 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
     /** {@inheritDoc} */
     @Override public void cacheProcessorStarted() throws IgniteCheckedException {
-        boolean hasBaseline = cctx.kernalContext().state().clusterState().hasBaselineTopology();
+        if (!cctx.kernalContext().state().clusterState().hasBaselineTopology())
+            return;
 
         Collection<DynamicCacheDescriptor> caches = cctx.cache().cacheDescriptors().values();
 
@@ -1912,25 +1913,23 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
         checkpointReadLock();
 
         try {
-            if (hasBaseline) {
-                U.log(log, "Restoring binary state for node joined to BaselineTopology");
+            U.log(log, "Restoring binary state for node joined to BaselineTopology");
 
-                // Preform early regions startup before restoring state.
-                initAndStartRegions(cfg);
+            // Preform early regions startup before restoring state.
+            initAndStartRegions(cfg);
 
-                for (DynamicCacheDescriptor desc : caches) {
-                    if (isPersistentCache(desc.cacheConfiguration(), cfg)) {
-                        storeMgr.initializeForCache(desc.groupDescriptor(),
-                            new StoredCacheData(desc.cacheConfiguration()));
-                    }
+            for (DynamicCacheDescriptor desc : caches) {
+                if (isPersistentCache(desc.cacheConfiguration(), cfg)) {
+                    storeMgr.initializeForCache(desc.groupDescriptor(),
+                        new StoredCacheData(desc.cacheConfiguration()));
                 }
-
-                CheckpointStatus status = readCheckpointStatus();
-
-                assert metaStorage == null : "MetaStorage wasn't stopped properly at node fail";
-
-                lastRestored = initMetaStorageAndRestoreMemory(status);
             }
+
+            CheckpointStatus status = readCheckpointStatus();
+
+            assert metaStorage == null : "MetaStorage wasn't properly stopped at node fail";
+
+            lastRestored = initMetaStorageAndRestoreMemory(status);
         }
         catch (StorageException e) {
             cctx.kernalContext().failure().process(new FailureContext(FailureType.CRITICAL_ERROR, e));
@@ -2238,6 +2237,8 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
     /**
      * @param status Last registered checkpoint status.
+     * @param metastoreOnly If {@code True} only metastorage records will be processed.
+     * @param strg Instance of MetaStorage to update.
      * @throws IgniteCheckedException If failed to apply updates.
      * @throws StorageException If IO exception occurred while reading write-ahead log.
      */
