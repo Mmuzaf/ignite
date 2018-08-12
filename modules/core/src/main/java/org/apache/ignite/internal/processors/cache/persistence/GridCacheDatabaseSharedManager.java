@@ -122,8 +122,6 @@ import org.apache.ignite.internal.processors.cache.persistence.file.FilePageStor
 import org.apache.ignite.internal.processors.cache.persistence.file.PersistentStorageIOException;
 import org.apache.ignite.internal.processors.cache.persistence.metastorage.MetaStorage;
 import org.apache.ignite.internal.processors.cache.persistence.metastorage.MetastorageLifecycleListener;
-import org.apache.ignite.internal.processors.cache.persistence.metastorage.MetastorageLifecycleListenerAdapter;
-import org.apache.ignite.internal.processors.cache.persistence.metastorage.ReadOnlyMetastorage;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.CheckpointMetricsTracker;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryEx;
 import org.apache.ignite.internal.processors.cache.persistence.pagemem.PageMemoryImpl;
@@ -135,7 +133,6 @@ import org.apache.ignite.internal.processors.cache.persistence.tree.io.PageParti
 import org.apache.ignite.internal.processors.cache.persistence.wal.FileWALPointer;
 import org.apache.ignite.internal.processors.cache.persistence.wal.crc.IgniteDataIntegrityViolationException;
 import org.apache.ignite.internal.processors.cache.persistence.wal.crc.PureJavaCrc32;
-import org.apache.ignite.internal.processors.cluster.BaselineTopology;
 import org.apache.ignite.internal.processors.port.GridPortRecord;
 import org.apache.ignite.internal.util.GridMultiCollectionWrapper;
 import org.apache.ignite.internal.util.GridUnsafe;
@@ -171,8 +168,8 @@ import static org.apache.ignite.IgniteSystemProperties.IGNITE_PDS_WAL_REBALANCE_
 import static org.apache.ignite.failure.FailureType.CRITICAL_ERROR;
 import static org.apache.ignite.failure.FailureType.SYSTEM_WORKER_TERMINATION;
 import static org.apache.ignite.internal.pagemem.wal.record.WALRecord.RecordType.CHECKPOINT_RECORD;
+import static org.apache.ignite.internal.processors.cache.GridCacheUtils.isPersistentCache;
 import static org.apache.ignite.internal.processors.cache.persistence.metastorage.MetaStorage.METASTORAGE_CACHE_ID;
-import static org.apache.ignite.internal.processors.cluster.GridClusterStateProcessor.METASTORE_CURR_BLT_KEY;
 
 /**
  *
@@ -497,34 +494,6 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
             persStoreMetrics.wal(cctx.wal());
 
-            // Restore binary state on join local node to BLT if need.
-            cctx.kernalContext().internalSubscriptionProcessor()
-                .registerMetastorageListener(
-                    new MetastorageLifecycleListenerAdapter() {
-                        /** {@inheritDoc} */
-                        @Override public void onReadyForRead(
-                            ReadOnlyMetastorage strg
-                        ) throws IgniteCheckedException {
-                            BaselineTopology blt = (BaselineTopology)strg.read(METASTORE_CURR_BLT_KEY);
-
-                            if (blt != null) {
-                                U.log(log, "Restoring binary state for node joined to BaselineTopology " +
-                                    "[bltId=" + blt.id() +
-                                    ", nodeId=" + cctx.kernalContext().localNodeId() + ']');
-
-                                // Preform early regions startup before restoring state.
-                                initAndStartRegions(cctx.kernalContext().config().getDataStorageConfiguration());
-
-                                CheckpointStatus status = readCheckpointStatus();
-
-                                assert metaStorage == null : "MetaStorage wasn't stopped properly";
-
-                                lastRestored = initMetaStorageAndRestoreMemory(status);
-                            }
-                        }
-                    }
-                );
-
             // Read data from MetaStorage for early #onReadyForRead notification.
             readMetastore();
         }
@@ -670,6 +639,8 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
             storePageMem.start();
 
+            checkpointReadLock();
+
             try {
                 restoreMemory(status, true, storePageMem);
 
@@ -684,6 +655,8 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                 notifyMetastorageReadyForRead(strg);
             }
             finally {
+                checkpointReadUnlock();
+
                 storePageMem.stop();
             }
         }
@@ -1925,6 +1898,51 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
         catch (IOException e) {
             throw new IgniteCheckedException(
                 "Failed to read checkpoint pointer from marker file: " + cpMarkerFile.getAbsolutePath(), e);
+        }
+    }
+
+    /** {@inheritDoc} */
+    @Override public void cacheProcessorStarted() throws IgniteCheckedException {
+        boolean hasBaseline = cctx.kernalContext().state().clusterState().hasBaselineTopology();
+
+        Collection<DynamicCacheDescriptor> caches = cctx.cache().cacheDescriptors().values();
+
+        DataStorageConfiguration cfg = cctx.kernalContext().config().getDataStorageConfiguration();
+
+        checkpointReadLock();
+
+        try {
+            if (hasBaseline) {
+                U.log(log, "Restoring binary state for node joined to BaselineTopology");
+
+                // Preform early regions startup before restoring state.
+                initAndStartRegions(cfg);
+
+                if (!F.isEmpty(caches)) {
+                    for (DynamicCacheDescriptor desc : caches) {
+                        if (isPersistentCache(desc.cacheConfiguration(), cfg)) {
+                            storeMgr.initializeForCache(
+                                desc.groupDescriptor(),
+                                new StoredCacheData(desc.cacheConfiguration())
+                            );
+                        }
+                    }
+                }
+
+                CheckpointStatus status = readCheckpointStatus();
+
+                assert metaStorage == null : "MetaStorage wasn't stopped properly at node fail";
+
+                lastRestored = initMetaStorageAndRestoreMemory(status);
+            }
+        }
+        catch (StorageException e) {
+            cctx.kernalContext().failure().process(new FailureContext(FailureType.CRITICAL_ERROR, e));
+
+            throw new IgniteCheckedException(e);
+        }
+        finally {
+            checkpointReadUnlock();
         }
     }
 

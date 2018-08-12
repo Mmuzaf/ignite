@@ -45,6 +45,7 @@ import org.apache.ignite.internal.pagemem.impl.PageMemoryNoStoreImpl;
 import org.apache.ignite.internal.processors.cache.CacheGroupContext;
 import org.apache.ignite.internal.processors.cache.DynamicCacheDescriptor;
 import org.apache.ignite.internal.processors.cache.GridCacheMapEntry;
+import org.apache.ignite.internal.processors.cache.GridCacheProcessor;
 import org.apache.ignite.internal.processors.cache.GridCacheSharedManagerAdapter;
 import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.GridDhtPartitionsExchangeFuture;
 import org.apache.ignite.internal.processors.cache.persistence.evict.FairFifoPageEvictionTracker;
@@ -207,7 +208,9 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
         return pageSize;
     }
 
-    /** */
+    /**
+     *
+     */
     private void startMemoryPolicies() {
         for (DataRegion memPlc : dataRegionMap.values()) {
             memPlc.pageMemory().start();
@@ -754,6 +757,13 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
      */
     public boolean beforeExchange(GridDhtPartitionsExchangeFuture discoEvt) throws IgniteCheckedException {
         return false;
+    }
+
+    /**
+     * Handle {@link GridCacheProcessor} started event.
+     */
+    public void cacheProcessorStarted() throws IgniteCheckedException {
+        // No-op.
     }
 
     /**

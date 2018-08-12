@@ -88,7 +88,7 @@ import static org.apache.ignite.internal.managers.communication.GridIoPolicy.SYS
  */
 public class GridClusterStateProcessor extends GridProcessorAdapter implements IGridClusterStateProcessor, MetastorageLifecycleListener {
     /** */
-    public static final String METASTORE_CURR_BLT_KEY = "metastoreBltKey";
+    private static final String METASTORE_CURR_BLT_KEY = "metastoreBltKey";
 
     /** */
     private boolean inMemoryMode;
