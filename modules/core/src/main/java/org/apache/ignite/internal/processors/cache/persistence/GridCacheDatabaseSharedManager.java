@@ -1931,11 +1931,6 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
             lastRestored = initMetaStorageAndRestoreMemory(status);
         }
-        catch (StorageException e) {
-            cctx.kernalContext().failure().process(new FailureContext(FailureType.CRITICAL_ERROR, e));
-
-            throw new IgniteCheckedException(e);
-        }
         finally {
             checkpointReadUnlock();
         }
