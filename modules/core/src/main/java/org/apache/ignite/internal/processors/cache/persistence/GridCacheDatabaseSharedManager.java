@@ -339,8 +339,11 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
     /** Number of pages in current checkpoint at the beginning of checkpoint. */
     private volatile int currCheckpointPagesCnt;
 
-    /** MetaStorage instance. {@code null} if storage not initialized yet. */
+    /** MetaStorage instance. Value {@code null} if storage not initialized yet. */
     private MetaStorage metaStorage;
+
+    /** Last restored pointer throught node startup or activation. */
+    private volatile WALPointer lastRestored;
 
     /** */
     private List<MetastorageLifecycleListener> metastorageLifecycleLsnrs;
@@ -514,7 +517,9 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
                                 CheckpointStatus status = readCheckpointStatus();
 
-                                initMetaStorageAndRestoreMemory(status);
+                                assert metaStorage == null : "MetaStorage wasn't stopped properly";
+
+                                lastRestored = initMetaStorageAndRestoreMemory(status);
                             }
                         }
                     }
@@ -745,6 +750,8 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
         /* Must be here, because after deactivate we can invoke activate and file lock must be already configured */
         stopping = false;
+
+        metaStorage = null;
     }
 
     /**
@@ -845,13 +852,21 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                 }
             }
 
-            // Storage already initialized and binary state restored.
-            if (metaStorage != null)
-                return;
-
             CheckpointStatus status = readCheckpointStatus();
 
-            initMetaStorageAndRestoreMemory(status);
+            lastRestored = initMetaStorageAndRestoreMemory(status);
+
+            // First, bring memory to the last consistent checkpoint state if needed.
+            // This method should return a pointer to the last valid record in the WAL.
+            cctx.wal().resumeLogging(lastRestored);
+
+            WALPointer ptr = cctx.wal().log(new MemoryRecoveryRecord(U.currentTimeMillis()));
+
+            if (ptr != null) {
+                cctx.wal().flush(ptr, true);
+
+                nodeStart(ptr);
+            }
 
             notifyMetastorageReadyForReadWrite();
         }
@@ -868,8 +883,16 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
     /**
      * Initialize {@link MetaStorage} and resore binary memory state.
+     *
+     * @param status Checkpoint status.
+     * @return Last readed {@link WALPointer} record of restored memory state.
+     * @throws IgniteCheckedException If fails.
      */
-    private void initMetaStorageAndRestoreMemory(CheckpointStatus status) throws IgniteCheckedException {
+    private WALPointer initMetaStorageAndRestoreMemory(CheckpointStatus status) throws IgniteCheckedException {
+        // Binary state already restored.
+        if (metaStorage != null)
+            return lastRestored;
+
         cctx.pageStore().initializeForMetastorage();
 
         metaStorage = new MetaStorage(
@@ -885,19 +908,9 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                 status.endPtr + ". Can't restore memory - critical part of WAL archive is missing.");
         }
 
-        // First, bring memory to the last consistent checkpoint state if needed.
-        // This method should return a pointer to the last valid record in the WAL.
-        cctx.wal().resumeLogging(restore);
-
-        WALPointer ptr = cctx.wal().log(new MemoryRecoveryRecord(U.currentTimeMillis()));
-
-        if (ptr != null) {
-            cctx.wal().flush(ptr, true);
-
-            nodeStart(ptr);
-        }
-
         metaStorage.init(this);
+
+        return restore;
     }
 
     /**
@@ -1026,8 +1039,6 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                 fileLockHolder.close();
             }
         }
-
-        metaStorage = null;
     }
 
     /** */
