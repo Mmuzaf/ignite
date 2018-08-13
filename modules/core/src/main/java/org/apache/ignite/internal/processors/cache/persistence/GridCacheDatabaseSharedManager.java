@@ -381,9 +381,9 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
     }
 
     /** */
-    private void notifyMetastorageReadyForRead(final MetaStorage strg) throws IgniteCheckedException {
+    private void notifyMetastorageReadyForRead() throws IgniteCheckedException {
         for (MetastorageLifecycleListener lsnr : metastorageLifecycleLsnrs)
-            lsnr.onReadyForRead(strg);
+            lsnr.onReadyForRead(metaStorage);
     }
 
     /** */
@@ -644,21 +644,23 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             try {
                 restoreMemory(status, true, storePageMem);
 
-                MetaStorage strg = new MetaStorage(cctx, regCfg, memMetrics, true);
+                metaStorage = new MetaStorage(cctx, regCfg, memMetrics, true);
 
-                strg.init(this);
+                metaStorage.init(this);
 
-                applyLastUpdates(status, true, strg);
+                applyLastUpdates(status, true);
 
-                fillWalDisabledGroups(strg);
+                fillWalDisabledGroups();
 
-                notifyMetastorageReadyForRead(strg);
+                notifyMetastorageReadyForRead();
             }
             finally {
                 checkpointReadUnlock();
-
-                storePageMem.stop();
             }
+
+            metaStorage = null;
+
+            storePageMem.stop();
         }
         catch (StorageException e) {
             cctx.kernalContext().failure().process(new FailureContext(FailureType.CRITICAL_ERROR, e));
@@ -1577,7 +1579,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             checkpointReadLock();
 
             try {
-                applyLastUpdates(status, false, metaStorage);
+                applyLastUpdates(status, false);
             }
             finally {
                 checkpointReadUnlock();
@@ -2233,20 +2235,13 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
     /**
      * @param status Last registered checkpoint status.
      * @param metastoreOnly If {@code True} only metastorage records will be processed.
-     * @param strg Instance of MetaStorage to update.
      * @throws IgniteCheckedException If failed to apply updates.
      * @throws StorageException If IO exception occurred while reading write-ahead log.
      */
-    private void applyLastUpdates(
-        CheckpointStatus status,
-        boolean metastoreOnly,
-        MetaStorage strg
-    ) throws IgniteCheckedException {
+    private void applyLastUpdates(CheckpointStatus status, boolean metastoreOnly) throws IgniteCheckedException {
         if (log.isInfoEnabled())
             log.info("Applying lost cache updates since last checkpoint record [lastMarked="
                 + status.startPtr + ", lastCheckpointId=" + status.cpStartId + ']');
-
-        assert strg != null : "MetaStorage not initialized";
 
         if (!metastoreOnly)
             cctx.kernalContext().query().skipFieldLookup(true);
@@ -2309,7 +2304,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                     case METASTORE_DATA_RECORD:
                         MetastoreDataRecord metastoreDataRecord = (MetastoreDataRecord)rec;
 
-                        strg.applyUpdate(metastoreDataRecord.key(), metastoreDataRecord.value());
+                        metaStorage.applyUpdate(metastoreDataRecord.key(), metastoreDataRecord.value());
 
                         break;
 
@@ -4408,10 +4403,14 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
         }
     }
 
-    /** */
-    private void fillWalDisabledGroups(MetaStorage strg) {
+    /**
+     *
+     */
+    private void fillWalDisabledGroups() {
+        MetaStorage meta = cctx.database().metaStorage();
+
         try {
-            Set<String> keys = strg.readForPredicate(WAL_KEY_PREFIX_PRED).keySet();
+            Set<String> keys = meta.readForPredicate(WAL_KEY_PREFIX_PRED).keySet();
 
             if (keys.isEmpty())
                 return;
