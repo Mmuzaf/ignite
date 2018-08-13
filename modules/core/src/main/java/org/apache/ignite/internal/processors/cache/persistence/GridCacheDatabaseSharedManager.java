@@ -1014,6 +1014,8 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                 fileLockHolder.close();
             }
         }
+
+        metaStorage = null;
     }
 
     /** */
