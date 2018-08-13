@@ -336,11 +336,17 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
     /** Number of pages in current checkpoint at the beginning of checkpoint. */
     private volatile int currCheckpointPagesCnt;
 
-    /** MetaStorage instance. Value {@code null} if storage not initialized yet. */
+    /**
+     * MetaStorage instance. Value {@code null} means storage not initialized yet.
+     * Guarded by {@link GridCacheDatabaseSharedManager#checkpointReadLock()}
+     */
     private MetaStorage metaStorage;
 
-    /** Last restored pointer throught node startup or activation. */
-    private volatile WALPointer lastRestored;
+    /**
+     * Last restored pointer throught node startup or activation. Can be {@code null}.
+     * Guarded by {@link GridCacheDatabaseSharedManager#checkpointReadLock()}
+     */
+    private WALPointer lastRestored;
 
     /** */
     private List<MetastorageLifecycleListener> metastorageLifecycleLsnrs;
