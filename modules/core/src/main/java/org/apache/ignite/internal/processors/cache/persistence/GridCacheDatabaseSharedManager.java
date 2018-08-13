@@ -337,7 +337,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
     private volatile int currCheckpointPagesCnt;
 
     /** MetaStorage instance. Value {@code null} if storage not initialized yet. */
-    private volatile MetaStorage metaStorage;
+    private MetaStorage metaStorage;
 
     /** Last restored pointer throught node startup or activation. */
     private volatile WALPointer lastRestored;
@@ -829,7 +829,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
             CheckpointStatus status = readCheckpointStatus();
 
-            lastRestored = initMetaStorageAndRestoreMemory(status);
+            lastRestored = createMetaStorageAndRestoreMemory(status);
 
             // First, bring memory to the last consistent checkpoint state if needed.
             // This method should return a pointer to the last valid record in the WAL.
@@ -842,6 +842,10 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
                 nodeStart(ptr);
             }
+
+            // Init metastore only after WAL logging resumed. Can't do it earlier because
+            // MetaStorage initialization also touches wal if #isWalDeltaRecordNeeded.
+            metaStorage.init(this);
 
             notifyMetastorageReadyForReadWrite();
         }
@@ -863,7 +867,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
      * @return Last readed {@link WALPointer} record of restored memory state.
      * @throws IgniteCheckedException If fails.
      */
-    private WALPointer initMetaStorageAndRestoreMemory(CheckpointStatus status) throws IgniteCheckedException {
+    private WALPointer createMetaStorageAndRestoreMemory(CheckpointStatus status) throws IgniteCheckedException {
         // Binary state already restored.
         if (metaStorage != null)
             return lastRestored;
@@ -882,8 +886,6 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             throw new StorageException("Restore wal pointer = " + restore + ", while status.endPtr = " +
                 status.endPtr + ". Can't restore memory - critical part of WAL archive is missing.");
         }
-
-        metaStorage.init(this);
 
         return restore;
     }
@@ -1933,7 +1935,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
             assert metaStorage == null : "MetaStorage wasn't properly stopped at node fail";
 
-            lastRestored = initMetaStorageAndRestoreMemory(status);
+            lastRestored = createMetaStorageAndRestoreMemory(status);
         }
         finally {
             checkpointReadUnlock();
