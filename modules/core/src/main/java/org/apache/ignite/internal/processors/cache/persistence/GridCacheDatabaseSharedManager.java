@@ -337,7 +337,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
     private volatile int currCheckpointPagesCnt;
 
     /** MetaStorage instance. Value {@code null} if storage not initialized yet. */
-    private MetaStorage metaStorage;
+    private volatile MetaStorage metaStorage;
 
     /** Last restored pointer throught node startup or activation. */
     private volatile WALPointer lastRestored;
@@ -656,11 +656,11 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             }
             finally {
                 checkpointReadUnlock();
+
+                storePageMem.stop();
             }
 
             metaStorage = null;
-
-            storePageMem.stop();
         }
         catch (StorageException e) {
             cctx.kernalContext().failure().process(new FailureContext(FailureType.CRITICAL_ERROR, e));
