@@ -663,10 +663,10 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             finally {
                 checkpointReadUnlock();
 
+                metaStorage = null;
+
                 storePageMem.stop();
             }
-
-            metaStorage = null;
         }
         catch (StorageException e) {
             cctx.kernalContext().failure().process(new FailureContext(FailureType.CRITICAL_ERROR, e));
@@ -870,7 +870,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
      * Initialize {@link MetaStorage} and resore binary memory state.
      *
      * @param status Checkpoint status.
-     * @return Last readed {@link WALPointer} record of restored memory state.
+     * @return Last pointer of restored memory state.
      * @throws IgniteCheckedException If fails.
      */
     private WALPointer createMetaStorageAndRestoreMemory(CheckpointStatus status) throws IgniteCheckedException {
@@ -2245,7 +2245,7 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
 
     /**
      * @param status Last registered checkpoint status.
-     * @param metastoreOnly If {@code True} only metastorage records will be processed.
+     * @param metastoreOnly If {@code True} only records related to metastorage will be processed.
      * @throws IgniteCheckedException If failed to apply updates.
      * @throws StorageException If IO exception occurred while reading write-ahead log.
      */
