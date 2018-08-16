@@ -340,13 +340,13 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
      * MetaStorage instance. Value {@code null} means storage not initialized yet.
      * Guarded by {@link GridCacheDatabaseSharedManager#checkpointReadLock()}
      */
-    private MetaStorage metaStorage;
+    private volatile MetaStorage metaStorage;
 
     /**
      * Last restored pointer throught node startup or activation. Can be {@code null}.
      * Guarded by {@link GridCacheDatabaseSharedManager#checkpointReadLock()}
      */
-    private WALPointer lastRestored;
+    private volatile WALPointer lastRestored;
 
     /** */
     private List<MetastorageLifecycleListener> metastorageLifecycleLsnrs;
@@ -1925,8 +1925,6 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
         checkpointReadLock();
 
         try {
-            U.log(log, "Restoring binary state for node joined to BaselineTopology");
-
             // Preform early regions startup before restoring state.
             initAndStartRegions(cfg);
 
@@ -1942,6 +1940,9 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
             assert metaStorage == null : "MetaStorage wasn't properly stopped at node fail";
 
             lastRestored = createMetaStorageAndRestoreMemory(status);
+
+            U.log(log, "Binary state before node joined to BaselineTopology restored [" +
+                "lastRestored=" + lastRestored + ']');
         }
         finally {
             checkpointReadUnlock();
@@ -2351,8 +2352,11 @@ public class GridCacheDatabaseSharedManager extends IgniteCacheDatabaseSharedMan
                 }
             }
 
-            if (!metastoreOnly)
+            if (!metastoreOnly) {
                 restorePartitionStates(partStates, null);
+
+                lastRestored = restoreLogicalState.lastReadRecordPointer();
+            }
         }
         finally {
             if (!metastoreOnly)
