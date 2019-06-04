@@ -87,13 +87,14 @@ public class ClusterReadOnlyModeTest extends ClusterReadOnlyModeAbstractTest {
 
                         streamer.addData(i, i + PART_ATOMIC_CACHE.hashCode());
                     }
-
-                    finishLatch.countDown();
                 }
                 catch (CacheException e) {
                     exThrown.compareAndSet(false, true);
 
                     log.info("Streamer cache exception is thrown", e.getMessage());
+                }
+                finally {
+                    finishLatch.countDown();
                 }
             }
         });
@@ -108,7 +109,7 @@ public class ClusterReadOnlyModeTest extends ClusterReadOnlyModeAbstractTest {
 
         finishLatch.await(5, TimeUnit.SECONDS);
 
-        assertDataStreamerReadOnlyMode(false, CACHE_NAMES);
+        assertCachesReadOnlyMode(false, CACHE_NAMES);
 
         assertTrue("DataStreamer exception not thrown during change readonly mode", exThrown.get());
     }
