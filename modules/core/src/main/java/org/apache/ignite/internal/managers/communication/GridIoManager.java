@@ -1767,6 +1767,9 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     }
 
     /**
+     * This method must be used prior to opening a {@link FileWriter} by calling {@link #openFileWriter(UUID, Object)}
+     * to ensure that remote and local nodes are fully support direct {@link SocketChannel} connection to transfer data.
+     *
      * @param node Remote node to check.
      * @return {@code true} if file can be send over socket channel directly.
      */
@@ -2590,9 +2593,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     "another thread. Channel will be closed [initMsg=" + initMsg + ", channel=" + channel +
                     ", fromNodeId=" + nodeId + ']'));
 
-                TransmitMeta exMeta = new TransmitMeta(ex);
-
-                exMeta.writeExternal(out);
+                new TransmitMeta(ex).writeExternal(out);
 
                 return;
             }
