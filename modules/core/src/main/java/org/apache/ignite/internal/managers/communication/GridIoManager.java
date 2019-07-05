@@ -2620,7 +2620,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                 // Send previous context state to sync remote and local node (on manager connected).
                 TransmitMeta meta = readCtx.receiver == null ? new TransmitMeta(readCtx.lastSeenErr) :
-                    readCtx.receiver.state().error(readCtx.lastSeenErr);
+                    readCtx.receiver.getState().error(readCtx.lastSeenErr);
 
                 meta.writeExternal(out);
 
@@ -2706,11 +2706,11 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                     receiver.receive(channel, meta, chunkSize);
 
-                    readCtx.receiver = null;
-
                     // Write processing ack.
                     out.writeLong(receiver.transferred());
                     out.flush();
+
+                    readCtx.receiver = null;
 
                     long downloadTime = U.currentTimeMillis() - startTime;
 
@@ -3006,8 +3006,6 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
             Map<String, Serializable> params,
             ReadPolicy plc
         ) throws IgniteCheckedException {
-            int retries = 0;
-
             try (FileSender sender = new FileSender(file,
                 offset,
                 count,
@@ -3020,6 +3018,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                         ", rmtNodeId=" + remoteId + ", topic=" + topic + ']');
 
                 long startTime = U.currentTimeMillis();
+                int retries = 0;
 
                 while (true) {
                     if (Thread.currentThread().isInterrupted())
@@ -3027,37 +3026,24 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                     checkNotStopped();
 
-                    if (retries > retryCnt)
-                        throw new IgniteCheckedException("The number of retry attempts exceeded the limit: " + retryCnt);
-
                     try {
-                        long uploaded = 0;
+                        TransmitMeta connMeta = null;
 
                         if (out == null && in == null) {
-                            TransmitMeta syncMeta = connect();
+                            connMeta = connect();
 
                             // Stop in case of any error occurred on remote node during file processing.
-                            if (syncMeta.error() != null)
-                                throw syncMeta.error();
-
-                            // If not the initial connection for the current session.
-                            if (!syncMeta.initial()) {
-                                uploaded = syncMeta.offset() - sender.startPosition();
-
-                                assert uploaded >= 0 : "Incorrect sync meta [offset=" + syncMeta.offset() +
-                                    ", startPos=" + sender.startPosition() + ']';
-                                assert sender.name().equals(syncMeta.name()) : "Attempt to transfer different file " +
-                                    "while previous is not completed [curr=" + sender.name() + ", meta=" + syncMeta + ']';
-                            }
+                            if (connMeta.error() != null)
+                                throw connMeta.error();
                         }
 
-                        sender.setup(out, uploaded, plc);
-                        sender.send(channel);
+                        sender.send(channel, out, connMeta, plc);
 
                         // Read file received acknowledge.
                         long total = in.readLong();
 
-                        assert total == sender.transferred();
+                        assert total == sender.transferred() : "File is not fully written [expect=" + total +
+                            ", transferred=" + sender.transferred() + ']';
 
                         break;
                     }
@@ -3069,9 +3055,14 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                             "will be re-establishing [remoteId=" + remoteId + ", file=" + file.getName() +
                             ", sesKey=" + sesKey + ", retries=" + retries +
                             ", transferred=" + sender.transferred() +
-                            ", count=" + sender.total() + ']', e);
+                            ", total=" + sender.total() + ']', e);
 
                         retries++;
+
+                        if (retries == retryCnt) {
+                            throw new IgniteCheckedException("The number of retry attempts to upload file exceeded " +
+                                "the limit: " + retryCnt, e);
+                        }
                     }
                 }
 

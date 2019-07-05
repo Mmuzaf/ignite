@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.internal.util.tostring.GridToStringInclude;
+import org.apache.ignite.internal.util.typedef.internal.A;
 import org.apache.ignite.internal.util.typedef.internal.S;
 
 import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
@@ -33,14 +34,14 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * predefined size over a socket channel.
  */
 abstract class AbstractTransmission implements Closeable {
+    /** Node stopping checker. */
+    private final Supplier<Boolean> stopChecker;
+
     /**
      * The position from which the transfer will start. For the {@link File} it will be offset
      * where the transfer begin data transfer.
      */
     protected final long startPos;
-
-    /** The unique input name to identify particular transfer part. */
-    protected final String name;
 
     /** The total number of bytes to send or receive. */
     protected final long total;
@@ -51,12 +52,12 @@ abstract class AbstractTransmission implements Closeable {
     /** The size of segment for the read. */
     protected int chunkSize;
 
-    /** Node stopping checker. */
-    private final Supplier<Boolean> stopChecker;
+    /** The unique input name to identify particular transfer part. */
+    protected final String name;
 
     /** Additional stream params. */
     @GridToStringInclude
-    private final Map<String, Serializable> params = new HashMap<>();
+    protected final Map<String, Serializable> params = new HashMap<>();
 
     /**
      * @param name The unique file name within transfer process.
@@ -72,6 +73,11 @@ abstract class AbstractTransmission implements Closeable {
         Map<String, Serializable> params,
         Supplier<Boolean> stopChecker
     ) {
+        A.notNullOrEmpty(name, "Trasmisson name cannot be empty or null");
+        A.ensure(startPos >= 0, "File start position cannot be negative");
+        A.ensure(total > 0, "Total number of bytes to transfer must be greater than zero");
+        A.notNull(stopChecker, "Process stop checker cannot be null");
+
         this.name = name;
         this.startPos = startPos;
         this.total = total;
@@ -79,20 +85,6 @@ abstract class AbstractTransmission implements Closeable {
 
         if (params != null)
             this.params.putAll(params);
-    }
-
-    /**
-     * @return Name of chunked object.
-     */
-    public String name() {
-        return name;
-    }
-
-    /**
-     * @return Start chunked object position (same as a file offset) .
-     */
-    public long startPosition() {
-        return startPos;
     }
 
     /**
@@ -110,16 +102,9 @@ abstract class AbstractTransmission implements Closeable {
     }
 
     /**
-     * @return Additional chunked object params.
-     */
-    public Map<String, Serializable> params() {
-        return params;
-    }
-
-    /**
      * @return {@code true} if the process of data sending\receiving must be interrupt.
      */
-    public boolean stopped() {
+    protected boolean stopped() {
         return stopChecker.get();
     }
 
@@ -130,15 +115,6 @@ abstract class AbstractTransmission implements Closeable {
         assert chunkSize > 0;
 
         this.chunkSize = chunkSize;
-    }
-
-    /**
-     * @param cnt The number of bytes which has been already transferred.
-     */
-    protected void transferred(long cnt) {
-        assert cnt >= 0;
-
-        transferred = cnt;
     }
 
     /**

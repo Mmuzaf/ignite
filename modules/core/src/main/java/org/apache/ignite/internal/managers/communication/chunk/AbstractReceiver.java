@@ -54,6 +54,13 @@ public abstract class AbstractReceiver extends AbstractTransmission {
     }
 
     /**
+     * @return File name processing by receiver.
+     */
+    public String name() {
+        return name;
+    }
+
+    /**
      * @param ch Input channel to read data from.
      * @throws IOException If an io exception occurred.
      * @throws IgniteCheckedException If some check failed.
@@ -68,7 +75,7 @@ public abstract class AbstractReceiver extends AbstractTransmission {
 
         if (meta.initial()) {
             assertParameter(!inited, "Read operation stopped. Attempt to receive a new file from channel, " +
-                "while the previous was not fully loaded [new=" + meta.name() + ", old=" + name() + ']');
+                "while the previous was not fully loaded [new=" + meta.name() + ", old=" + name + ']');
 
             init(chunkSize);
 
@@ -78,8 +85,8 @@ public abstract class AbstractReceiver extends AbstractTransmission {
             assertParameter(inited, "Read operation stopped. Recevier must be initialized " +
                 "[meta=" + meta + ']');
 
-            assertParameter(name().equals(meta.name()), "Attempt to load different file " +
-                "[name=" + name() + ", meta=" + meta + ']');
+            assertParameter(name.equals(meta.name()), "Attempt to load different file " +
+                "[name=" + name + ", meta=" + meta + ']');
 
             assertParameter(startPos + transferred == meta.offset(),
                 "The next chunk offest is incorrect [startPos=" + startPos +
@@ -106,12 +113,12 @@ public abstract class AbstractReceiver extends AbstractTransmission {
     /**
      * @return Current receiver state written to a {@link TransmitMeta} instance.
      */
-    public TransmitMeta state() {
-        return new TransmitMeta(name(),
+    public TransmitMeta getState() {
+        return new TransmitMeta(name,
             startPos + transferred,
             total,
             transferred == 0,
-            params(),
+            params,
             policy(),
             null,
             null);

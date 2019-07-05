@@ -26,7 +26,6 @@ import java.nio.channels.WritableByteChannel;
 import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
-import org.apache.ignite.IgniteException;
 import org.apache.ignite.internal.managers.communication.ReadPolicy;
 import org.apache.ignite.internal.managers.communication.TransmitMeta;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
@@ -35,6 +34,9 @@ import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccess
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
+import org.jetbrains.annotations.Nullable;
+
+import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
 
 /**
  * Class represents a sender of chunked data which can be pushed to channel.
@@ -78,62 +80,45 @@ public class FileSender extends AbstractTransmission {
         chunkSize(chunkSize);
     }
 
-    /** {@inheritDoc} */
-    @Override public void transferred(long cnt) {
-        try {
-            if (fileIo != null)
-                fileIo.position(startPos + cnt);
-
-            super.transferred(cnt);
-        }
-        catch (IOException e) {
-            throw new IgniteException("Unable to set new start file channel position [pos=" + (startPos + cnt) + ']');
-        }
-    }
-
     /**
+     * @param ch Output channel to write data to.
      * @param oo Channel to write data to.
-     * @param uploadedBytes Number of bytes transferred on previous attempt.
+     * @param connMeta Meta received on connection established.
      * @param plc Policy of way how data will be handled on remote node.
-     * @throws IOException If write meta input failed.
+     * @throws IOException If an io exception occurred.
      * @throws IgniteCheckedException If fails.
      */
-    public void setup(
+    public void send(WritableByteChannel ch,
         ObjectOutput oo,
-        long uploadedBytes,
+        @Nullable TransmitMeta connMeta,
         ReadPolicy plc
     ) throws IOException, IgniteCheckedException {
-        transferred(uploadedBytes);
-
-        TransmitMeta meta = new TransmitMeta(name(),
-            startPos + transferred,
-            total,
-            transferred == 0,
-            params(),
-            plc,
-            null,
-            null);
-
-        meta.writeExternal(oo);
-
         try {
-            fileIo = dfltIoFactory.create(file);
+            if (fileIo == null) {
+                fileIo = dfltIoFactory.create(file);
 
-            fileIo.position(startPos);
+                fileIo.position(startPos);
+            }
         }
         catch (IOException e) {
             // Consider this IO exeption as a user one (not the network exception) and interrupt upload process.
             throw new IgniteCheckedException("Unable to initialize a file IO. File upload will be interrupted", e);
         }
-    }
 
-    /**
-     * @param ch Output channel to write data to.
-     * @throws IOException If an io exception occurred.
-     * @throws IgniteCheckedException If fails.
-     */
-    public void send(WritableByteChannel ch) throws IOException, IgniteCheckedException {
-        assert fileIo != null : "Write operation stopped. Chunked object is not initialized";
+        // If not the initial connection for the current session.
+        if (connMeta != null)
+            setState(connMeta);
+
+        // Send meta about curent file to remote.
+        new TransmitMeta(name,
+            startPos + transferred,
+            total,
+            transferred == 0,
+            params,
+            plc,
+            null,
+            null)
+            .writeExternal(oo);
 
         while (hasNextChunk()) {
             if (Thread.currentThread().isInterrupted() || stopped()) {
@@ -145,6 +130,40 @@ public class FileSender extends AbstractTransmission {
         }
 
         assertTransferredBytes();
+    }
+
+    /**
+     * @param connMeta Meta file information about
+     * @throws IgniteCheckedException If fails.
+     */
+    private void setState(TransmitMeta connMeta) throws IgniteCheckedException {
+        assert connMeta != null;
+        assert fileIo != null;
+
+        if (connMeta.initial())
+            return;
+
+        long uploadedBytes = connMeta.offset() - startPos;
+
+        assertParameter(name.equals(connMeta.name()), "Attempt to transfer different file " +
+            "while previous is not completed [curr=" + name + ", meta=" + connMeta + ']');
+
+        assertParameter(uploadedBytes >= 0, "Incorrect sync meta [offset=" + connMeta.offset() +
+            ", startPos=" + startPos + ']');
+
+        // No need to set new file position, if it is not changed.
+        if (uploadedBytes == 0)
+            return;
+
+        try {
+            fileIo.position(startPos + uploadedBytes);
+        }
+        catch (IOException e) {
+            throw new IgniteCheckedException("Unable to set new start file channel position " +
+                "[pos=" + (startPos + uploadedBytes) + ']', e);
+        }
+
+        transferred = uploadedBytes;
     }
 
     /**
