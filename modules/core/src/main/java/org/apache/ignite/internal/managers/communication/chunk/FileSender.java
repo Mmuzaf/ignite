@@ -41,7 +41,7 @@ import org.apache.ignite.internal.util.typedef.internal.U;
  * Supports the zero-copy streaming algorithm,  see {@link FileChannel#transferTo(long, long, WritableByteChannel)}
  * for details.
  */
-public class FileSender extends AbstractChunkProcess {
+public class FileSender extends AbstractProcess {
     /** The default factory to provide IO oprations over underlying file. */
     @GridToStringExclude
     private static final FileIOFactory dfltIoFactory = new RandomAccessFileIOFactory();

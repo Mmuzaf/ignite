@@ -36,7 +36,7 @@ public interface ChunkReceiverFactory {
      * @return Chunk receiver instance.
      * @throws IgniteCheckedException If fails.
      */
-    public AbstractChunkReceiver create(
+    public AbstractReceiver create(
         UUID nodeId,
         TransmissionHandler handler,
         TransmitMeta meta,

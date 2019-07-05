@@ -32,7 +32,7 @@ import org.apache.ignite.internal.util.typedef.internal.S;
  * Buffered chunked receiver can handle input socket channel by chunks of data and
  * deliver it to an allocated {@link ByteBuffer}.
  */
-public class BufferChunkReceiver extends AbstractChunkReceiver {
+public class ChunkReceiver extends AbstractReceiver {
     /** Chunked channel handler to process data with chunks. */
     private final ChunkHandler handler;
 
@@ -47,7 +47,7 @@ public class BufferChunkReceiver extends AbstractChunkReceiver {
      * @param stopChecker Node stop or prcoess interrupt checker.
      * @param handler The chunk handler to process each chunk.
      */
-    public BufferChunkReceiver(
+    public ChunkReceiver(
         String name,
         long startPos,
         long cnt,
@@ -127,6 +127,6 @@ public class BufferChunkReceiver extends AbstractChunkReceiver {
 
     /** {@inheritDoc} */
     @Override public String toString() {
-        return S.toString(BufferChunkReceiver.class, this, "super", super.toString());
+        return S.toString(ChunkReceiver.class, this, "super", super.toString());
     }
 }

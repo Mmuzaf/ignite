@@ -31,7 +31,7 @@ import org.apache.ignite.internal.util.typedef.internal.S;
  * Class represents base object which can we transferred (written or readed) by chunks of
  * predefined size over a socket channel.
  */
-abstract class AbstractChunkProcess implements Closeable {
+abstract class AbstractProcess implements Closeable {
     /** Additional stream params. */
     @GridToStringInclude
     private final Map<String, Serializable> params = new HashMap<>();
@@ -64,7 +64,7 @@ abstract class AbstractChunkProcess implements Closeable {
      * @param params Additional stream params.
      * @param stopChecker Node stop or prcoess interrupt checker.
      */
-    protected AbstractChunkProcess(
+    protected AbstractProcess(
         String name,
         long startPos,
         long cnt,
@@ -166,6 +166,6 @@ abstract class AbstractChunkProcess implements Closeable {
 
     /** {@inheritDoc} */
     @Override public String toString() {
-        return S.toString(AbstractChunkProcess.class, this);
+        return S.toString(AbstractProcess.class, this);
     }
 }

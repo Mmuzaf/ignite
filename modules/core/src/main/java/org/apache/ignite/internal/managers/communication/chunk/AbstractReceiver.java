@@ -29,7 +29,7 @@ import org.apache.ignite.internal.managers.communication.TransmitMeta;
  * Class represents a receiver of data which can be pulled from a channel by chunks of
  * predefined size. Closes when a transmission of represented object ends.
  */
-public abstract class AbstractChunkReceiver extends AbstractChunkProcess {
+public abstract class AbstractReceiver extends AbstractProcess {
     /** Initialization completion flag. */
     private boolean inited;
 
@@ -40,7 +40,7 @@ public abstract class AbstractChunkReceiver extends AbstractChunkProcess {
      * @param params Additional stream params.
      * @param stopChecker Node stop or prcoess interrupt checker.
      */
-    protected AbstractChunkReceiver(
+    protected AbstractReceiver(
         String name,
         long startPos,
         long cnt,

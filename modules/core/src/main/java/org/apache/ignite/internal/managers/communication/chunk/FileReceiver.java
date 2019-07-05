@@ -37,7 +37,7 @@ import org.apache.ignite.internal.util.typedef.internal.U;
  * Class represents a chunk data receiver which is pulling data from channel vi
  * {@link FileChannel#transferFrom(ReadableByteChannel, long, long)}.
  */
-public class FileReceiver extends AbstractChunkReceiver {
+public class FileReceiver extends AbstractReceiver {
     /** The default factory to provide IO oprations over underlying file. */
     @GridToStringExclude
     private static final FileIOFactory dfltIoFactory = new RandomAccessFileIOFactory();

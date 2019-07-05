@@ -175,7 +175,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             fileCrcs.put(file.getName(), FastCrc.calcCrc(file));
         }
 
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic)) {
             // Iterate over cache partition cacheParts.
@@ -241,7 +241,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             }
         });
 
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.FILE);
@@ -292,7 +292,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             }
         });
 
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.FILE);
@@ -352,7 +352,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             }
         });
 
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.FILE);
@@ -394,7 +394,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             }
         });
 
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.FILE);
@@ -441,7 +441,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             }
         });
 
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.FILE);
@@ -452,7 +452,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         }
 
         //Open next session and complete successfull.
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.FILE);
@@ -464,7 +464,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         IgniteCheckedException err = null;
 
         // Open next writer on removed topic.
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.FILE);
@@ -513,10 +513,10 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
 
         IgniteCheckedException[] errs = new IgniteCheckedException[1];
 
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic);
-             FileWriter anotherWriter = sender.context()
+             GridIoManager.FileWriter anotherWriter = sender.context()
                  .io()
                  .openFileWriter(receiver.localNode().id(), topic)) {
             // Will connect on write attempt.
@@ -611,7 +611,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             }
         });
 
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.BUFF);
@@ -653,7 +653,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             }
         });
 
-        try (FileWriter writer = sender.context()
+        try (GridIoManager.FileWriter writer = sender.context()
             .io()
             .openFileWriter(receiver.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.BUFF);
