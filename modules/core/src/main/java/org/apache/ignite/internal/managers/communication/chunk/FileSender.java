@@ -82,7 +82,7 @@ public class FileSender extends AbstractTransmission {
     @Override public void transferred(long cnt) {
         try {
             if (fileIo != null)
-                fileIo.position(startPosition() + cnt);
+                fileIo.position(startPos + cnt);
 
             super.transferred(cnt);
         }
@@ -119,7 +119,7 @@ public class FileSender extends AbstractTransmission {
         try {
             fileIo = dfltIoFactory.create(file);
 
-            fileIo.position(startPosition());
+            fileIo.position(startPos);
         }
         catch (IOException e) {
             // Consider this IO exeption as a user one (not the network exception) and interrupt upload process.

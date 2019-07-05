@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.internal.managers.communication.ChunkHandler;
+import org.apache.ignite.internal.managers.communication.ReadPolicy;
 import org.apache.ignite.internal.util.typedef.internal.S;
 
 /**
@@ -60,6 +61,11 @@ public class ChunkReceiver extends AbstractReceiver {
         assert handler != null;
 
         this.handler = handler;
+    }
+
+    /** {@inheritDoc} */
+    @Override protected ReadPolicy policy() {
+        return ReadPolicy.BUFF;
     }
 
     /** {@inheritDoc} */

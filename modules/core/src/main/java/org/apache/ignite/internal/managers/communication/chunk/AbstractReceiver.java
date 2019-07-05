@@ -23,6 +23,7 @@ import java.nio.channels.ReadableByteChannel;
 import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.internal.managers.communication.ReadPolicy;
 import org.apache.ignite.internal.managers.communication.TransmitMeta;
 
 import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
@@ -101,6 +102,25 @@ public abstract class AbstractReceiver extends AbstractTransmission {
 
         assertTransferredBytes();
     }
+
+    /**
+     * @return Current receiver state written to a {@link TransmitMeta} instance.
+     */
+    public TransmitMeta state() {
+        return new TransmitMeta(name(),
+            startPos + transferred,
+            total,
+            transferred == 0,
+            params(),
+            policy(),
+            null,
+            null);
+    }
+
+    /**
+     * @return Read policy of data handling.
+     */
+    protected abstract ReadPolicy policy();
 
     /**
      * @param chunkSize The size of chunk to read.

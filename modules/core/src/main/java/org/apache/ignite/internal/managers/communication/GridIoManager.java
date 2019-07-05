@@ -2618,23 +2618,9 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     readSesCtxs.put(topic, readCtx);
                 }
 
-                TransmitMeta meta;
-
                 // Send previous context state to sync remote and local node (on manager connected).
-                if (readCtx.receiver == null)
-                    meta = new TransmitMeta(readCtx.lastSeenErr);
-                else {
-                    final AbstractReceiver receiver = readCtx.receiver;
-
-                    meta = new TransmitMeta(receiver.name(),
-                        receiver.startPosition() + receiver.transferred(),
-                        receiver.total(),
-                        receiver.transferred() == 0,
-                        receiver.params(),
-                        readCtx.currPlc,
-                        readCtx.lastSeenErr,
-                        null);
-                }
+                TransmitMeta meta = readCtx.receiver == null ? new TransmitMeta(readCtx.lastSeenErr) :
+                    readCtx.receiver.state().error(readCtx.lastSeenErr);
 
                 meta.writeExternal(out);
 
@@ -2713,8 +2699,6 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                         readCtx.handler,
                         meta,
                         () -> stopping || readCtx.interrupted);
-
-                    readCtx.currPlc = meta.policy();
                 }
 
                 try (AbstractReceiver receiver = readCtx.receiver) {
@@ -2723,7 +2707,6 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     receiver.receive(channel, meta, chunkSize);
 
                     readCtx.receiver = null;
-                    readCtx.currPlc = null;
 
                     // Write processing ack.
                     out.writeLong(receiver.transferred());
@@ -2862,9 +2845,6 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
         /** The number of retry attempts of current session to wait. */
         private int retries;
-
-        /** Read policy of the way of handling input data. */
-        private ReadPolicy currPlc;
 
         /** Last infinished downloading object. */
         private AbstractReceiver receiver;

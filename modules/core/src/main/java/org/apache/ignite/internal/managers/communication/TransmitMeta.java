@@ -162,6 +162,15 @@ public class TransmitMeta implements Externalizable {
     }
 
     /**
+     * @param err An exception instance if it has been previously occurred.
+     */
+    public TransmitMeta error(Exception err) {
+        this.err = err;
+
+        return this;
+    }
+
+    /**
      * @return An exception instance if it has been previously occurred.
      */
     public Exception error() {
