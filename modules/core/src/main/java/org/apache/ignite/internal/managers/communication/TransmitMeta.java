@@ -66,7 +66,7 @@ public class TransmitMeta implements Externalizable {
     private Exception err;
 
     /** Session close state. If not {@code null} that session must be closed. */
-    private Boolean closed;
+    private Boolean exit;
 
     /**
      * Default constructor, usually used to create meta to read channel data into.
@@ -90,7 +90,7 @@ public class TransmitMeta implements Externalizable {
      * @param params Additional transfer meta params.
      * @param plc Policy of how file will be handled.
      * @param err Last seen error if it has been occurred, or {@code null} the otherwise.
-     * @param closed {@code true} if session must be closed.
+     * @param exit {@code true} if session must be closed.
      */
     public TransmitMeta(
         String name,
@@ -100,7 +100,7 @@ public class TransmitMeta implements Externalizable {
         Map<String, Serializable> params,
         ReadPolicy plc,
         Exception err,
-        Boolean closed
+        Boolean exit
     ) {
         this.name = name;
         this.offset = offset;
@@ -114,7 +114,7 @@ public class TransmitMeta implements Externalizable {
 
         this.plc = plc;
         this.err = err;
-        this.closed = closed;
+        this.exit = exit;
     }
 
     /**
@@ -180,8 +180,8 @@ public class TransmitMeta implements Externalizable {
     /**
      * @return {@code true} if session must be closed.
      */
-    public boolean closed() {
-        return ofNullable(closed).orElse(Boolean.FALSE);
+    public boolean exit() {
+        return ofNullable(exit).orElse(Boolean.FALSE);
     }
 
     /** {@inheritDoc} */
@@ -193,7 +193,7 @@ public class TransmitMeta implements Externalizable {
         out.writeObject(map);
         out.writeObject(plc);
         out.writeObject(err);
-        out.writeObject(closed);
+        out.writeObject(exit);
     }
 
     /** {@inheritDoc} */
@@ -206,7 +206,7 @@ public class TransmitMeta implements Externalizable {
             map = (HashMap)in.readObject();
             plc = (ReadPolicy)in.readObject();
             err = (Exception)in.readObject();
-            closed = (Boolean)in.readObject();
+            exit = (Boolean)in.readObject();
         }
         catch (ClassNotFoundException e) {
             throw new IOException("Required class information for deserializing meta not found", e);

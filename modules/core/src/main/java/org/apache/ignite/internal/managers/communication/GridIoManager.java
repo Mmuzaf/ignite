@@ -2686,7 +2686,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                 meta.readExternal(in);
 
-                if (meta.closed()) {
+                if (meta.exit()) {
                     readCtx.handler.onEnd(readCtx.nodeId);
 
                     readSesCtxs.remove(topic);
