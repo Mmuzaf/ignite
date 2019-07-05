@@ -23,57 +23,58 @@ import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
-import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.internal.util.tostring.GridToStringInclude;
 import org.apache.ignite.internal.util.typedef.internal.S;
+
+import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
 
 /**
  * Class represents base object which can we transferred (written or readed) by chunks of
  * predefined size over a socket channel.
  */
-abstract class AbstractProcess implements Closeable {
-    /** Additional stream params. */
-    @GridToStringInclude
-    private final Map<String, Serializable> params = new HashMap<>();
-
-    /** The size of segment for the read. */
-    private int chunkSize;
-
-    /** The unique input name to identify particular transfer part. */
-    private String name;
-
+abstract class AbstractTransmission implements Closeable {
     /**
      * The position from which the transfer will start. For the {@link File} it will be offset
      * where the transfer begin data transfer.
      */
-    private long startPos;
+    protected final long startPos;
 
-    /** The total number of bytes to send. */
-    private long cnt;
+    /** The unique input name to identify particular transfer part. */
+    protected final String name;
 
-    /** Node stopping checker. */
-    private Supplier<Boolean> stopChecker;
+    /** The total number of bytes to send or receive. */
+    protected final long total;
 
     /** The number of bytes successfully transferred druring iteration. */
     protected long transferred;
 
+    /** The size of segment for the read. */
+    protected int chunkSize;
+
+    /** Node stopping checker. */
+    private final Supplier<Boolean> stopChecker;
+
+    /** Additional stream params. */
+    @GridToStringInclude
+    private final Map<String, Serializable> params = new HashMap<>();
+
     /**
      * @param name The unique file name within transfer process.
      * @param startPos The position from which the transfer should start to.
-     * @param cnt The number of bytes to expect of transfer.
+     * @param total The number of bytes to expect of transfer.
      * @param params Additional stream params.
      * @param stopChecker Node stop or prcoess interrupt checker.
      */
-    protected AbstractProcess(
+    protected AbstractTransmission(
         String name,
         long startPos,
-        long cnt,
+        long total,
         Map<String, Serializable> params,
         Supplier<Boolean> stopChecker
     ) {
         this.name = name;
         this.startPos = startPos;
-        this.cnt = cnt;
+        this.total = total;
         this.stopChecker = stopChecker;
 
         if (params != null)
@@ -97,15 +98,8 @@ abstract class AbstractProcess implements Closeable {
     /**
      * @return Number of bytes to transfer (read from or write to channel).
      */
-    public long count() {
-        return cnt;
-    }
-
-    /**
-     * @return Size of each chunk in bytes.
-     */
-    public int chunkSize() {
-        return chunkSize;
+    public long total() {
+        return total;
     }
 
     /**
@@ -151,21 +145,19 @@ abstract class AbstractProcess implements Closeable {
      * @return {@code true} if and only if a chunked object has received all the data it expects.
      */
     protected boolean hasNextChunk() {
-        return transferred < cnt;
+        return transferred < total;
     }
 
     /**
-     * @throws IgniteCheckedException If fails.
+     * Check actual transferred bytes not excedeed the limit.
      */
-    protected void checkTransferLimitCount() throws IgniteCheckedException {
-        if (transferred > cnt) {
-            throw new IgniteCheckedException("File has been transferred with incorrect size " +
-                "[expect=" + cnt + ", actual=" + transferred + ']');
-        }
+    protected void assertTransferredBytes() {
+        assertParameter(transferred <= total, "File has been transferred with incorrect size " +
+            "[expect=" + total + ", actual=" + transferred + ']');
     }
 
     /** {@inheritDoc} */
     @Override public String toString() {
-        return S.toString(AbstractProcess.class, this);
+        return S.toString(AbstractTransmission.class, this);
     }
 }

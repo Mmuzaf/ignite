@@ -25,11 +25,13 @@ import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.internal.managers.communication.TransmitMeta;
 
+import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
+
 /**
  * Class represents a receiver of data which can be pulled from a channel by chunks of
  * predefined size. Closes when a transmission of represented object ends.
  */
-public abstract class AbstractReceiver extends AbstractProcess {
+public abstract class AbstractReceiver extends AbstractTransmission {
     /** Initialization completion flag. */
     private boolean inited;
 
@@ -55,8 +57,37 @@ public abstract class AbstractReceiver extends AbstractProcess {
      * @throws IOException If an io exception occurred.
      * @throws IgniteCheckedException If some check failed.
      */
-    public void receive(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
-        assert inited : "Read operation stopped. Chunked object is not initialized";
+    public void receive(
+        ReadableByteChannel ch,
+        TransmitMeta meta,
+        int chunkSize
+    ) throws IOException, IgniteCheckedException {
+        assert meta != null;
+        assert chunkSize > 0;
+
+        if (meta.initial()) {
+            assertParameter(!inited, "Read operation stopped. Attempt to receive a new file from channel, " +
+                "while the previous was not fully loaded [new=" + meta.name() + ", old=" + name() + ']');
+
+            init(chunkSize);
+
+            inited = true;
+        }
+        else {
+            assertParameter(inited, "Read operation stopped. Recevier must be initialized " +
+                "[meta=" + meta + ']');
+
+            assertParameter(name().equals(meta.name()), "Attempt to load different file " +
+                "[name=" + name() + ", meta=" + meta + ']');
+
+            assertParameter(startPos + transferred == meta.offset(),
+                "The next chunk offest is incorrect [startPos=" + startPos +
+                    ", transferred=" + transferred + ", meta=" + meta + ']');
+
+            assertParameter(total == meta.total(), " The count of bytes to transfer for " +
+                "the next chunk is incorrect [total=" + total + ", transferred=" + transferred +
+                ", startPos=" + startPos + ", meta=" + meta + ']');
+        }
 
         // Read data from the input.
         while (hasNextChunk()) {
@@ -67,50 +98,8 @@ public abstract class AbstractReceiver extends AbstractProcess {
 
             readChunk(ch);
         }
-    }
 
-    /**
-     * @param meta Provided file meta.
-     * @param chunkSize The size of chunk to read.
-     * @throws IgniteCheckedException If validation failed.
-     */
-    public void setup(TransmitMeta meta, int chunkSize) throws IgniteCheckedException {
-        assert meta != null;
-        assert chunkSize > 0;
-
-        if (meta.initial()) {
-            if (inited) {
-                throw new IgniteCheckedException("Attempt to read a new file from channel, but previous was not fully " +
-                    "loaded [new=" + meta.name() + ", old=" + name() + ']');
-            }
-
-            init(chunkSize);
-
-            inited = true;
-        }
-        else {
-            if (inited) {
-                if (!name().equals(meta.name())) {
-                    throw new IgniteCheckedException("Attempt to load different file name [name=" + name() +
-                        ", meta=" + meta + ']');
-                }
-
-                if (startPosition() + transferred() != meta.offset()) {
-                    throw new IgniteCheckedException("The next chunk input is incorrect " +
-                        "[postition=" + startPosition() + ", transferred=" + transferred() + ", meta=" + meta + ']');
-                }
-
-                if (count() != meta.count()) {
-                    throw new IgniteCheckedException(" The count of bytes to transfer for the next chunk is incorrect " +
-                        "[count=" + count() + ", transferred=" + transferred() +
-                        ", startPos=" + startPosition() + ", meta=" + meta + ']');
-                }
-            }
-            else {
-                throw new IgniteCheckedException("The setup of previous stream read failed [new=" + meta.name() +
-                    ", old=" + name() + ']');
-            }
-        }
+        assertTransferredBytes();
     }
 
     /**

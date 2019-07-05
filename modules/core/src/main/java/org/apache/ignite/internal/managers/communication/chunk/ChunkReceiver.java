@@ -89,7 +89,7 @@ public class ChunkReceiver extends AbstractReceiver {
             res = ch.read(buff);
 
             if (res < 0) {
-                if (transferred + readed != count())
+                if (transferred + readed != total)
                     throw new IOException("Input data channel reached its end, but chunked object has not fully loaded");
 
                 break;
@@ -109,13 +109,6 @@ public class ChunkReceiver extends AbstractReceiver {
         buff.flip();
 
         handler.accept(buff);
-    }
-
-    /** {@inheritDoc} */
-    @Override public void receive(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
-        super.receive(ch);
-
-        checkTransferLimitCount();
     }
 
     /** {@inheritDoc} */

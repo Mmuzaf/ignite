@@ -2628,7 +2628,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                     meta = new TransmitMeta(receiver.name(),
                         receiver.startPosition() + receiver.transferred(),
-                        receiver.count(),
+                        receiver.total(),
                         receiver.transferred() == 0,
                         receiver.params(),
                         readCtx.currPlc,
@@ -2720,8 +2720,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 try (AbstractReceiver receiver = readCtx.receiver) {
                     long startTime = U.currentTimeMillis();
 
-                    receiver.setup(meta, chunkSize);
-                    receiver.receive(channel);
+                    receiver.receive(channel, meta, chunkSize);
 
                     readCtx.receiver = null;
                     readCtx.currPlc = null;
@@ -2782,26 +2781,26 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 return new FileReceiver(
                     meta.name(),
                     meta.offset(),
-                    meta.count(),
+                    meta.total(),
                     meta.params(),
                     stopChecker,
                     handler.fileHandler(nodeId,
                         meta.name(),
                         meta.offset(),
-                        meta.count(),
+                        meta.total(),
                         meta.params()));
 
             case BUFF:
                 return new ChunkReceiver(
                     meta.name(),
                     meta.offset(),
-                    meta.count(),
+                    meta.total(),
                     meta.params(),
                     stopChecker,
                     handler.chunkHandler(nodeId,
                         meta.name(),
                         meta.offset(),
-                        meta.count(),
+                        meta.total(),
                         meta.params()));
 
             default:
@@ -3090,7 +3089,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                             "will be re-establishing [remoteId=" + remoteId + ", file=" + file.getName() +
                             ", sesKey=" + sesKey + ", retries=" + retries +
                             ", transferred=" + sender.transferred() +
-                            ", count=" + sender.count() + ']', e);
+                            ", count=" + sender.total() + ']', e);
 
                         retries++;
                     }

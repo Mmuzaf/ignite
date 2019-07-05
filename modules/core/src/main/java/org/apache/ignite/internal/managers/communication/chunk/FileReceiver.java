@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.internal.managers.communication.FileHandler;
+import org.apache.ignite.internal.managers.communication.TransmitMeta;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
 import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIOFactory;
@@ -76,13 +77,15 @@ public class FileReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override public void receive(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
-        super.receive(ch);
+    @Override public void receive(
+        ReadableByteChannel ch,
+        TransmitMeta meta,
+        int chunkSize
+    ) throws IOException, IgniteCheckedException {
+        super.receive(ch, meta, chunkSize);
 
-        if (transferred() == count())
+        if (transferred == total)
             handler.accept(file);
-
-        checkTransferLimitCount();
     }
 
     /** {@inheritDoc} */
@@ -112,16 +115,16 @@ public class FileReceiver extends AbstractReceiver {
             if (fileIo == null) {
                 fileIo = dfltIoFactory.create(file);
 
-                fileIo.position(startPosition());
+                fileIo.position(startPos);
             }
         }
         catch (IOException e) {
             throw new IgniteCheckedException("Unable to open file for IO operations. File download will be stopped", e);
         }
 
-        long batchSize = Math.min(chunkSize(), count() - transferred());
+        long batchSize = Math.min(chunkSize, total - transferred);
 
-        long readed = fileIo.transferFrom(ch, startPosition() + transferred(), batchSize);
+        long readed = fileIo.transferFrom(ch, startPos + transferred, batchSize);
 
         if (readed > 0)
             transferred += readed;

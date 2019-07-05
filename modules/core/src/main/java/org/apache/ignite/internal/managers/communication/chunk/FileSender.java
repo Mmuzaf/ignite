@@ -41,7 +41,7 @@ import org.apache.ignite.internal.util.typedef.internal.U;
  * Supports the zero-copy streaming algorithm,  see {@link FileChannel#transferTo(long, long, WritableByteChannel)}
  * for details.
  */
-public class FileSender extends AbstractProcess {
+public class FileSender extends AbstractTransmission {
     /** The default factory to provide IO oprations over underlying file. */
     @GridToStringExclude
     private static final FileIOFactory dfltIoFactory = new RandomAccessFileIOFactory();
@@ -87,7 +87,7 @@ public class FileSender extends AbstractProcess {
             super.transferred(cnt);
         }
         catch (IOException e) {
-            throw new IgniteException("Unable to set new start file channel position [pos=" + (startPosition() + cnt) + ']');
+            throw new IgniteException("Unable to set new start file channel position [pos=" + (startPos + cnt) + ']');
         }
     }
 
@@ -106,9 +106,9 @@ public class FileSender extends AbstractProcess {
         transferred(uploadedBytes);
 
         TransmitMeta meta = new TransmitMeta(name(),
-            startPosition() + transferred(),
-            count(),
-            transferred() == 0,
+            startPos + transferred,
+            total,
+            transferred == 0,
             params(),
             plc,
             null,
@@ -144,7 +144,7 @@ public class FileSender extends AbstractProcess {
             writeChunk(ch);
         }
 
-        checkTransferLimitCount();
+        assertTransferredBytes();
     }
 
     /**
@@ -152,9 +152,9 @@ public class FileSender extends AbstractProcess {
      * @throws IOException If fails.
      */
     private void writeChunk(WritableByteChannel ch) throws IOException {
-        long batchSize = Math.min(chunkSize(), count() - transferred());
+        long batchSize = Math.min(chunkSize, total - transferred);
 
-        long sent = fileIo.transferTo(startPosition() + transferred(), batchSize, ch);
+        long sent = fileIo.transferTo(startPos + transferred, batchSize, ch);
 
         if (sent > 0)
             transferred += sent;

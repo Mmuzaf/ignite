@@ -268,13 +268,13 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
                 new FileReceiver(
                     meta.name(),
                     meta.offset(),
-                    meta.count(),
+                    meta.total(),
                     meta.params(),
                     checker,
                     hndlr.fileHandler(nodeId,
                         meta.name(),
                         meta.offset(),
-                        meta.count(),
+                        meta.total(),
                         meta.params())) {
                     @Override public void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
                         // Read 5 chunks than stop the grid.
@@ -321,13 +321,13 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
                 return new FileReceiver(
                     meta.name(),
                     meta.offset(),
-                    meta.count(),
+                    meta.total(),
                     meta.params(),
                     checker,
                     hndlr.fileHandler(nodeId,
                         meta.name(),
                         meta.offset(),
-                        meta.count(),
+                        meta.total(),
                         meta.params())) {
                     @Override public void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
                         // Read 4 chunks than throw an exception to emulate error processing.

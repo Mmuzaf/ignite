@@ -51,7 +51,7 @@ public class TransmitMeta implements Externalizable {
     private long offset;
 
     /** Number of bytes to transfer started from given <tt>offset</tt>. */
-    private long cnt;
+    private long total;
 
     /** The initial meta info for the file transferred the first time. */
     private boolean initial;
@@ -85,7 +85,7 @@ public class TransmitMeta implements Externalizable {
     /**
      * @param name The string name representation to assoticate particular meta with.
      * @param offset The start position of file.
-     * @param cnt The amount of bytes to receive by remote.
+     * @param total The amount of bytes to receive by remote.
      * @param initial {@code true} if file is send first time, {@code false} means file meta for the next reconnect attempt.
      * @param params Additional transfer meta params.
      * @param plc Policy of how file will be handled.
@@ -95,7 +95,7 @@ public class TransmitMeta implements Externalizable {
     public TransmitMeta(
         String name,
         long offset,
-        long cnt,
+        long total,
         boolean initial,
         Map<String, Serializable> params,
         ReadPolicy plc,
@@ -104,7 +104,7 @@ public class TransmitMeta implements Externalizable {
     ) {
         this.name = name;
         this.offset = offset;
-        this.cnt = cnt;
+        this.total = total;
         this.initial = initial;
 
         if (params != null) {
@@ -136,8 +136,8 @@ public class TransmitMeta implements Externalizable {
     /**
      * @return The number of bytes expect to transfer.
      */
-    public long count() {
-        return cnt;
+    public long total() {
+        return total;
     }
 
     /**
@@ -179,7 +179,7 @@ public class TransmitMeta implements Externalizable {
     @Override public void writeExternal(ObjectOutput out) throws IOException {
         out.writeUTF(name());
         out.writeLong(offset);
-        out.writeLong(cnt);
+        out.writeLong(total);
         out.writeBoolean(initial);
         out.writeObject(map);
         out.writeObject(plc);
@@ -192,7 +192,7 @@ public class TransmitMeta implements Externalizable {
         try {
             name = in.readUTF();
             offset = in.readLong();
-            cnt = in.readLong();
+            total = in.readLong();
             initial = in.readBoolean();
             map = (HashMap)in.readObject();
             plc = (ReadPolicy)in.readObject();
@@ -215,14 +215,14 @@ public class TransmitMeta implements Externalizable {
         TransmitMeta meta = (TransmitMeta)o;
 
         return offset == meta.offset &&
-            cnt == meta.cnt &&
+            total == meta.total &&
             initial == meta.initial &&
             name.equals(meta.name);
     }
 
     /** {@inheritDoc} */
     @Override public int hashCode() {
-        return Objects.hash(name, offset, cnt, initial);
+        return Objects.hash(name, offset, total, initial);
     }
 
     /** {@inheritDoc} */
