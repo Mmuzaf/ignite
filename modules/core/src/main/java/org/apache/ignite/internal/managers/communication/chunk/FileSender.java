@@ -120,6 +120,8 @@ public class FileSender extends AbstractTransmission {
             null)
             .writeExternal(oo);
 
+        oo.flush();
+
         while (hasNextChunk()) {
             if (Thread.currentThread().isInterrupted() || stopped()) {
                 throw new IgniteCheckedException("Thread has been interrupted or operation has been cancelled " +
