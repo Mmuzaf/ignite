@@ -35,7 +35,7 @@ import org.apache.ignite.internal.util.typedef.internal.S;
  */
 public class ChunkReceiver extends AbstractReceiver {
     /** Chunked channel handler to process data with chunks. */
-    private final ChunkHandler handler;
+    private final ChunkHandler hnd;
 
     /** The destination object to transfer data to\from. */
     private ByteBuffer buf;
@@ -46,7 +46,7 @@ public class ChunkReceiver extends AbstractReceiver {
      * @param cnt The number of bytes to expect of transfer.
      * @param params Additional stream params.
      * @param stopChecker Node stop or prcoess interrupt checker.
-     * @param handler The chunk handler to process each chunk.
+     * @param hnd The chunk hnd to process each chunk.
      */
     public ChunkReceiver(
         String name,
@@ -54,13 +54,13 @@ public class ChunkReceiver extends AbstractReceiver {
         long cnt,
         Map<String, Serializable> params,
         Supplier<Boolean> stopChecker,
-        ChunkHandler handler
+        ChunkHandler hnd
     ) {
         super(name, startPos, cnt, params, stopChecker);
 
-        assert handler != null;
+        assert hnd != null;
 
-        this.handler = handler;
+        this.hnd = hnd;
     }
 
     /** {@inheritDoc} */
@@ -72,7 +72,7 @@ public class ChunkReceiver extends AbstractReceiver {
     @Override protected void init(int chunkSize) throws IgniteCheckedException {
         assert buf == null;
 
-        int buffSize = handler.size();
+        int buffSize = hnd.size();
 
         int size = buffSize > 0 ? buffSize : chunkSize;
 
@@ -114,14 +114,14 @@ public class ChunkReceiver extends AbstractReceiver {
 
         buf.flip();
 
-        handler.accept(buf);
+        hnd.accept(buf);
     }
 
     /** {@inheritDoc} */
     @Override public void close() throws IOException {
         buf = null;
 
-        handler.close();
+        hnd.close();
     }
 
     /** {@inheritDoc} */

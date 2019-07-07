@@ -85,13 +85,16 @@ import org.apache.ignite.internal.direct.DirectMessageWriter;
 import org.apache.ignite.internal.managers.GridManagerAdapter;
 import org.apache.ignite.internal.managers.communication.chunk.AbstractReceiver;
 import org.apache.ignite.internal.managers.communication.chunk.ChunkReceiver;
-import org.apache.ignite.internal.managers.communication.chunk.ChunkReceiverFactory;
 import org.apache.ignite.internal.managers.communication.chunk.FileReceiver;
 import org.apache.ignite.internal.managers.communication.chunk.FileSender;
 import org.apache.ignite.internal.managers.deployment.GridDeployment;
 import org.apache.ignite.internal.managers.eventstorage.GridEventStorageManager;
 import org.apache.ignite.internal.managers.eventstorage.GridLocalEventListener;
 import org.apache.ignite.internal.processors.cache.mvcc.msg.MvccMessage;
+import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
+import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
+import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIO;
+import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIOFactory;
 import org.apache.ignite.internal.processors.platform.message.PlatformMessageFilter;
 import org.apache.ignite.internal.processors.pool.PoolProcessor;
 import org.apache.ignite.internal.processors.security.OperationSecurityContext;
@@ -190,8 +193,15 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     /** The map of sessions which are currently writing files and their corresponding interruption flags. */
     private final ConcurrentMap<T2<UUID, IgniteUuid>, AtomicBoolean> fileWriterStopFlags = new ConcurrentHashMap<>();
 
-    /** The factory produces chunk data receivers which are process a channel with data. */
-    private ChunkReceiverFactory chunkRcvFactory;
+    /**
+     * Default factory to provide IO oprations over files for futher transmission them between nodes.
+     * Some implementation of senders\receivers are using the zero-copy algorithm to tranasfer bytes
+     * from a file to the given SocketChannel. So, it is necessary to produce an {@link FileIO}
+     * implementation based on {@link FileChannel} which is reflected as {@link RandomAccessFileIO}.
+     *
+     * @see FileChannel#transferTo(long, long, WritableByteChannel)
+     */
+    private FileIOFactory fileIoFactory = new RandomAccessFileIOFactory();
 
     /** The maximum number of retry attempts (read or write attempts). */
     private int retryCnt;
@@ -280,8 +290,6 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         locNodeId = ctx.localNodeId();
 
         marsh = ctx.config().getMarshaller();
-
-        chunkRcvFactory = this::createChunkReceiver;
 
         synchronized (sysLsnrsMux) {
             sysLsnrs = new GridMessageListener[GridTopic.values().length];
@@ -2699,7 +2707,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 }
 
                 if (readCtx.lastRcv == null) {
-                    readCtx.lastRcv = chunkRcvFactory.create(readCtx.nodeId,
+                    readCtx.lastRcv = createChunkReceiver(readCtx.nodeId,
                         readCtx.hnd,
                         meta,
                         () -> stopping || readCtx.interrupted);
@@ -2743,10 +2751,13 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     }
 
     /**
-     * @param factory A new factory instance to set.
+     * Set factory to produce an FileIO abstraction over sended\received files.
+     * @see #fileIoFactory
+     *
+     * @param factory A new factory instance for creating {@link FileIO}
      */
-    void chunkReceiverFactory(ChunkReceiverFactory factory) {
-        chunkRcvFactory = factory;
+    void transfererFileIoFactory(FileIOFactory factory) {
+        fileIoFactory = factory;
     }
 
     /**
@@ -2771,6 +2782,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     meta.total(),
                     meta.params(),
                     stopChecker,
+                    fileIoFactory,
                     handler.fileHandler(nodeId,
                         meta.name(),
                         meta.offset(),
@@ -3015,6 +3027,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 cnt,
                 params,
                 () -> stopping || fileWriterStopFlags.get(sesKey).get(),
+                fileIoFactory,
                 chunkSize)
             ) {
                 if (log.isDebugEnabled())

@@ -30,7 +30,6 @@ import org.apache.ignite.internal.managers.communication.ReadPolicy;
 import org.apache.ignite.internal.managers.communication.TransmitMeta;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
-import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIOFactory;
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
@@ -46,7 +45,7 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
 public class FileSender extends AbstractTransferer {
     /** The default factory to provide IO oprations over underlying file. */
     @GridToStringExclude
-    private static final FileIOFactory dfltIoFactory = new RandomAccessFileIOFactory();
+    private final FileIOFactory fileIoFactory;
 
     /** The abstract java representation of the chunked file. */
     private final File file;
@@ -61,6 +60,7 @@ public class FileSender extends AbstractTransferer {
      * @param cnt Number of bytes to transfer.
      * @param params Additional file params.
      * @param stopChecker Node stop or prcoess interrupt checker.
+     * @param factory Factory to produce IO interface on files.
      * @param chunkSize The size of chunk to read.
      */
     public FileSender(
@@ -69,6 +69,7 @@ public class FileSender extends AbstractTransferer {
         long cnt,
         Map<String, Serializable> params,
         Supplier<Boolean> stopChecker,
+        FileIOFactory factory,
         int chunkSize
     ) {
         super(file.getName(), pos, cnt, params, stopChecker);
@@ -78,6 +79,8 @@ public class FileSender extends AbstractTransferer {
         this.file = file;
 
         chunkSize(chunkSize);
+
+        fileIoFactory = factory;
     }
 
     /**
@@ -95,7 +98,7 @@ public class FileSender extends AbstractTransferer {
     ) throws IOException, IgniteCheckedException {
         try {
             if (fileIo == null) {
-                fileIo = dfltIoFactory.create(file);
+                fileIo = fileIoFactory.create(file);
 
                 fileIo.position(startPos);
             }

@@ -30,7 +30,6 @@ import org.apache.ignite.internal.managers.communication.ReadPolicy;
 import org.apache.ignite.internal.managers.communication.TransmitMeta;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
-import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIOFactory;
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
@@ -42,10 +41,10 @@ import org.apache.ignite.internal.util.typedef.internal.U;
 public class FileReceiver extends AbstractReceiver {
     /** The default factory to provide IO oprations over underlying file. */
     @GridToStringExclude
-    private static final FileIOFactory dfltIoFactory = new RandomAccessFileIOFactory();
+    private final FileIOFactory fileIoFactory;
 
     /** Handler to notify when a file has been processed. */
-    private final FileHandler handler;
+    private final FileHandler hnd;
 
     /** The abstract java representation of the chunked file. */
     private File file;
@@ -60,7 +59,8 @@ public class FileReceiver extends AbstractReceiver {
      * @param cnt The number of bytes to expect of transfer.
      * @param params Additional stream params.
      * @param stopChecker Node stop or prcoess interrupt checker.
-     * @param handler The file handler to process download result.
+     * @param factory Factory to produce IO interface on files.
+     * @param hnd The file hnd to process download result.
      */
     public FileReceiver(
         String name,
@@ -68,13 +68,15 @@ public class FileReceiver extends AbstractReceiver {
         long cnt,
         Map<String, Serializable> params,
         Supplier<Boolean> stopChecker,
-        FileHandler handler
+        FileIOFactory factory,
+        FileHandler hnd
     ) {
         super(name, startPos, cnt, params, stopChecker);
 
-        assert handler != null;
+        assert hnd != null;
 
-        this.handler = handler;
+        fileIoFactory = factory;
+        this.hnd = hnd;
     }
 
     /** {@inheritDoc} */
@@ -86,7 +88,7 @@ public class FileReceiver extends AbstractReceiver {
         super.receive(ch, meta, chunkSize);
 
         if (transferred == total)
-            handler.accept(file);
+            hnd.accept(file);
     }
 
     /** {@inheritDoc} */
@@ -100,7 +102,7 @@ public class FileReceiver extends AbstractReceiver {
 
         chunkSize(chunkSize);
 
-        String fileAbsPath = handler.path();
+        String fileAbsPath = hnd.path();
 
         if (fileAbsPath == null || fileAbsPath.trim().isEmpty())
             throw new IgniteCheckedException("File receiver absolute path cannot be empty or null. Receiver cannot be" +
@@ -113,7 +115,7 @@ public class FileReceiver extends AbstractReceiver {
     @Override protected void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
         try {
             if (fileIo == null) {
-                fileIo = dfltIoFactory.create(file);
+                fileIo = fileIoFactory.create(file);
 
                 fileIo.position(startPos);
             }

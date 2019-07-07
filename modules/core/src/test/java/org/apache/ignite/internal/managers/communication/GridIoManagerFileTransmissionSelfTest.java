@@ -25,6 +25,8 @@ import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.channels.WritableByteChannel;
+import java.nio.file.OpenOption;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -43,9 +45,10 @@ import org.apache.ignite.configuration.DataStorageConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.GridTopic;
 import org.apache.ignite.internal.IgniteEx;
-import org.apache.ignite.internal.managers.communication.chunk.FileReceiver;
 import org.apache.ignite.internal.processors.cache.IgniteInternalCache;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
+import org.apache.ignite.internal.processors.cache.persistence.file.FileIODecorator;
+import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
 import org.apache.ignite.internal.processors.cache.persistence.file.FilePageStoreManager;
 import org.apache.ignite.internal.processors.cache.persistence.file.RandomAccessFileIOFactory;
 import org.apache.ignite.internal.processors.cache.persistence.wal.crc.FastCrc;
@@ -68,6 +71,9 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
 
     /** Temporary directory to store files. */
     private static final String TEMP_FILES_DIR = "ctmp";
+
+    /** Factory to produce IO interfaces over files to transmit. */
+    private static final FileIOFactory IO_FACTORY = new RandomAccessFileIOFactory();
 
     /** The topic to send files to. */
     private static Object topic;
@@ -263,27 +269,24 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
 
         File fileToSend = createFileRandomData("testFile", fileSizeBytes);
 
-        receiver.context().io()
-            .chunkReceiverFactory((nodeId, hnd, meta, checker) ->
-                new FileReceiver(
-                    meta.name(),
-                    meta.offset(),
-                    meta.total(),
-                    meta.params(),
-                    checker,
-                    hnd.fileHandler(nodeId,
-                        meta.name(),
-                        meta.offset(),
-                        meta.total(),
-                        meta.params())) {
-                    @Override public void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
-                        // Read 5 chunks than stop the grid.
+        sender.context().io().transfererFileIoFactory(new FileIOFactory() {
+            @Override public FileIO create(File file, OpenOption... modes) throws IOException {
+                FileIO fileIo = IO_FACTORY.create(file, modes);
+
+                // Blocking writer and stopping node FileIo.
+                return new FileIODecorator(fileIo) {
+                    /** {@inheritDoc} */
+                    @Override public long transferTo(long position, long count, WritableByteChannel target)
+                        throws IOException {
+                        // Send 5 chunks than stop the receiver.
                         if (chunksCnt.incrementAndGet() == 5)
                             stopGrid(receiver.name(), true);
 
-                        super.readChunk(ch);
+                        return super.transferTo(position, count, target);
                     }
-                });
+                };
+            }
+        });
 
         receiver.context().io().addTransmissionHandler(topic, new TransmissionHandlerAdapter() {
             @Override public FileHandler fileHandler(UUID nodeId, String name, long offset, long cnt,
@@ -314,32 +317,23 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         File fileToSend = createFileRandomData("testFile", 5 * 1024 * 1024);
         final AtomicInteger readedChunks = new AtomicInteger();
 
-        receiver.context().io()
-            .chunkReceiverFactory((nodeId, hnd, meta, checker) -> {
-                assertEquals(meta.policy(), ReadPolicy.FILE);
+        receiver.context().io().transfererFileIoFactory(new FileIOFactory() {
+            @Override public FileIO create(File file, OpenOption... modes) throws IOException {
+                FileIO fileIo = IO_FACTORY.create(file, modes);
 
-                return new FileReceiver(
-                    meta.name(),
-                    meta.offset(),
-                    meta.total(),
-                    meta.params(),
-                    checker,
-                    hnd.fileHandler(nodeId,
-                        meta.name(),
-                        meta.offset(),
-                        meta.total(),
-                        meta.params())) {
-                    @Override public void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
+                // Blocking writer and stopping node FileIo.
+                return new FileIODecorator(fileIo) {
+                    @Override public long transferFrom(ReadableByteChannel src, long position, long count)
+                        throws IOException {
                         // Read 4 chunks than throw an exception to emulate error processing.
                         if (readedChunks.incrementAndGet() == 4)
                             throw new IgniteException(chunkDownloadExMsg);
 
-                        super.readChunk(ch);
-
-                        assertTrue(transferred > 0);
+                        return super.transferFrom(src, position, count);
                     }
                 };
-            });
+            }
+        });
 
         receiver.context().io().addTransmissionHandler(topic, new TransmissionHandlerAdapter() {
             @Override public FileHandler fileHandler(UUID nodeId, String name, long offset, long cnt,
