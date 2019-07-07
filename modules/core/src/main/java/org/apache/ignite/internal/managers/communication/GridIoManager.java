@@ -206,7 +206,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     /** The maximum number of retry attempts (read or write attempts). */
     private int retryCnt;
 
-    /** Default size of each chunk of data recevier or sender. */
+    /** Size of each chunk transferred over the network of data recevier or sender. */
     private int chunkSize = DFLT_CHUNK_SIZE_BYTES;
 
     /** Listeners by topic. */
