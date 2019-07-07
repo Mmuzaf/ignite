@@ -194,10 +194,10 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     private final ConcurrentMap<T2<UUID, IgniteUuid>, AtomicBoolean> fileWriterStopFlags = new ConcurrentHashMap<>();
 
     /**
-     * Default factory to provide IO oprations over files for futher transmission them between nodes.
-     * Some implementation of senders\receivers are using the zero-copy algorithm to tranasfer bytes
-     * from a file to the given SocketChannel. So, it is necessary to produce an {@link FileIO}
-     * implementation based on {@link FileChannel} which is reflected as {@link RandomAccessFileIO}.
+     * Default factory to provide IO operation interface over files for futher transmission them between nodes.
+     * Some implementations of file senders\receivers are using the zero-copy algorithm to tranasfer bytes
+     * from a file to the given <tt>SocketChannel</tt> and vice-versa. So, it is necessary to produce an {@link FileIO}
+     * implementation based on {@link FileChannel} which is reflected in Ignite project as {@link RandomAccessFileIO}.
      *
      * @see FileChannel#transferTo(long, long, WritableByteChannel)
      */
@@ -1761,9 +1761,9 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * @param ses The session will be created for a new channel opened.
      */
     public void addTransmissionHandler(Object topic, TransmissionHandler ses) {
-        TransmissionHandler hdlr = topicTransmitHnds.putIfAbsent(topic, ses);
+        TransmissionHandler hnd = topicTransmitHnds.putIfAbsent(topic, ses);
 
-        if (hdlr != null)
+        if (hnd != null)
             U.warn(log, "The topic already have an appropriate session handler [topic=" + topic + ']');
     }
 

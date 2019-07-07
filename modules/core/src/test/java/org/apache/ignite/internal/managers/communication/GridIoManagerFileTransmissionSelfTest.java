@@ -146,6 +146,8 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         Map<String, Integer> fileCrcs = new HashMap<>();
         Map<String, Serializable> fileParams = new HashMap<>();
 
+        assertTrue(snd.context().io().fileTransmissionSupported(rcv.localNode()));
+
         rcv.context().io().addTransmissionHandler(topic, new TransmissionHandlerAdapter() {
             @Override public void onBegin(UUID nodeId) {
                 assertEquals(snd.localNode().id(), nodeId);
