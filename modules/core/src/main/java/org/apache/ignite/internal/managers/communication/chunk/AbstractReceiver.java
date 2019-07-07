@@ -32,7 +32,7 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * Class represents a receiver of data which can be pulled from a channel by chunks of
  * predefined size. Closes when a transmission of represented object ends.
  */
-public abstract class AbstractReceiver extends AbstractTransmission {
+public abstract class AbstractReceiver extends AbstractTransferer {
     /** Initialization completion flag. */
     private boolean inited;
 

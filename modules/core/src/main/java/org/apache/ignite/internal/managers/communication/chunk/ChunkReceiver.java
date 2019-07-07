@@ -38,7 +38,7 @@ public class ChunkReceiver extends AbstractReceiver {
     private final ChunkHandler handler;
 
     /** The destination object to transfer data to\from. */
-    private ByteBuffer buff;
+    private ByteBuffer buf;
 
     /**
      * @param name The unique file name within transfer process.
@@ -70,7 +70,7 @@ public class ChunkReceiver extends AbstractReceiver {
 
     /** {@inheritDoc} */
     @Override protected void init(int chunkSize) throws IgniteCheckedException {
-        assert buff == null;
+        assert buf == null;
 
         int buffSize = handler.size();
 
@@ -78,21 +78,21 @@ public class ChunkReceiver extends AbstractReceiver {
 
         chunkSize(size);
 
-        buff = ByteBuffer.allocate(size);
-        buff.order(ByteOrder.nativeOrder());
+        buf = ByteBuffer.allocate(size);
+        buf.order(ByteOrder.nativeOrder());
     }
 
     /** {@inheritDoc} */
     @Override protected void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
-        buff.rewind();
+        buf.rewind();
 
         int readed = 0;
         int res;
 
         // Read data from input channel utill the buffer will be completely filled
-        // (buff.remaining() returns 0) or partitially filled buffer if it was the last chunk.
+        // (buf.remaining() returns 0) or partitially filled buffer if it was the last chunk.
         while (true) {
-            res = ch.read(buff);
+            res = ch.read(buf);
 
             if (res < 0) {
                 if (transferred + readed != total)
@@ -103,7 +103,7 @@ public class ChunkReceiver extends AbstractReceiver {
 
             readed += res;
 
-            if (readed == buff.capacity() || buff.position() == buff.capacity())
+            if (readed == buf.capacity() || buf.position() == buf.capacity())
                 break;
         }
 
@@ -112,14 +112,14 @@ public class ChunkReceiver extends AbstractReceiver {
 
         transferred += readed;
 
-        buff.flip();
+        buf.flip();
 
-        handler.accept(buff);
+        handler.accept(buf);
     }
 
     /** {@inheritDoc} */
     @Override public void close() throws IOException {
-        buff = null;
+        buf = null;
 
         handler.close();
     }

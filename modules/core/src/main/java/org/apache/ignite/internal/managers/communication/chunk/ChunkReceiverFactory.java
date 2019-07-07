@@ -30,7 +30,7 @@ import org.apache.ignite.internal.managers.communication.TransmitMeta;
 public interface ChunkReceiverFactory {
     /**
      * @param nodeId Remote node id.
-     * @param handler The current handler instance which produces chunk recevier handlers.
+     * @param hnd The current handler instance which produces chunk recevier handlers.
      * @param meta Meta information of input data.
      * @param checker Process stopped checker.
      * @return Chunk receiver instance.
@@ -38,7 +38,7 @@ public interface ChunkReceiverFactory {
      */
     public AbstractReceiver create(
         UUID nodeId,
-        TransmissionHandler handler,
+        TransmissionHandler hnd,
         TransmitMeta meta,
         Supplier<Boolean> checker
     ) throws IgniteCheckedException;

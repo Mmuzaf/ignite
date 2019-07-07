@@ -20,6 +20,7 @@ package org.apache.ignite.internal.managers.communication.chunk;
 import java.io.Closeable;
 import java.io.File;
 import java.io.Serializable;
+import java.nio.channels.SocketChannel;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -30,10 +31,10 @@ import org.apache.ignite.internal.util.typedef.internal.S;
 import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
 
 /**
- * Class represents base object which can we transferred (written or readed) by chunks of
- * predefined size over a socket channel.
+ * Class represents base object which can transmit files (read or write) by chunks of
+ * predefined size over an opened {@link SocketChannel}.
  */
-abstract class AbstractTransmission implements Closeable {
+abstract class AbstractTransferer implements Closeable {
     /** Node stopping checker. */
     private final Supplier<Boolean> stopChecker;
 
@@ -66,7 +67,7 @@ abstract class AbstractTransmission implements Closeable {
      * @param params Additional stream params.
      * @param stopChecker Node stop or prcoess interrupt checker.
      */
-    protected AbstractTransmission(
+    protected AbstractTransferer(
         String name,
         long startPos,
         long total,
@@ -134,6 +135,6 @@ abstract class AbstractTransmission implements Closeable {
 
     /** {@inheritDoc} */
     @Override public String toString() {
-        return S.toString(AbstractTransmission.class, this);
+        return S.toString(AbstractTransferer.class, this);
     }
 }

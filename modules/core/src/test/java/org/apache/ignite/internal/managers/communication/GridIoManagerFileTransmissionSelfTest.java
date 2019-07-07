@@ -264,14 +264,14 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         File fileToSend = createFileRandomData("testFile", fileSizeBytes);
 
         receiver.context().io()
-            .chunkReceiverFactory((nodeId, hndlr, meta, checker) ->
+            .chunkReceiverFactory((nodeId, hnd, meta, checker) ->
                 new FileReceiver(
                     meta.name(),
                     meta.offset(),
                     meta.total(),
                     meta.params(),
                     checker,
-                    hndlr.fileHandler(nodeId,
+                    hnd.fileHandler(nodeId,
                         meta.name(),
                         meta.offset(),
                         meta.total(),
@@ -315,7 +315,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         final AtomicInteger readedChunks = new AtomicInteger();
 
         receiver.context().io()
-            .chunkReceiverFactory((nodeId, hndlr, meta, checker) -> {
+            .chunkReceiverFactory((nodeId, hnd, meta, checker) -> {
                 assertEquals(meta.policy(), ReadPolicy.FILE);
 
                 return new FileReceiver(
@@ -324,7 +324,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
                     meta.total(),
                     meta.params(),
                     checker,
-                    hndlr.fileHandler(nodeId,
+                    hnd.fileHandler(nodeId,
                         meta.name(),
                         meta.offset(),
                         meta.total(),

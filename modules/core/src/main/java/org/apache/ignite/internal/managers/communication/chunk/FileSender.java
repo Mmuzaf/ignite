@@ -43,7 +43,7 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * Supports the zero-copy streaming algorithm,  see {@link FileChannel#transferTo(long, long, WritableByteChannel)}
  * for details.
  */
-public class FileSender extends AbstractTransmission {
+public class FileSender extends AbstractTransferer {
     /** The default factory to provide IO oprations over underlying file. */
     @GridToStringExclude
     private static final FileIOFactory dfltIoFactory = new RandomAccessFileIOFactory();
@@ -102,7 +102,7 @@ public class FileSender extends AbstractTransmission {
         }
         catch (IOException e) {
             // Consider this IO exeption as a user one (not the network exception) and interrupt upload process.
-            throw new IgniteCheckedException("Unable to initialize a file IO. File upload will be interrupted", e);
+            throw new IgniteCheckedException("Unable to initialize source file. File  sender upload will be stopped", e);
         }
 
         // If not the initial connection for the current session.

@@ -90,13 +90,6 @@ public class FileReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override public void close() throws IOException {
-        U.closeQuiet(fileIo);
-
-        fileIo = null;
-    }
-
-    /** {@inheritDoc} */
     @Override protected ReadPolicy policy() {
         return ReadPolicy.FILE;
     }
@@ -109,8 +102,9 @@ public class FileReceiver extends AbstractReceiver {
 
         String fileAbsPath = handler.path();
 
-        if (fileAbsPath == null)
-            throw new IgniteCheckedException("Requested for the chunked stream a file absolute path is incorrect: " + this);
+        if (fileAbsPath == null || fileAbsPath.trim().isEmpty())
+            throw new IgniteCheckedException("File receiver absolute path cannot be empty or null. Receiver cannot be" +
+                " initialized: " + this);
 
         file = new File(fileAbsPath);
     }
@@ -125,7 +119,7 @@ public class FileReceiver extends AbstractReceiver {
             }
         }
         catch (IOException e) {
-            throw new IgniteCheckedException("Unable to open file for IO operations. File download will be stopped", e);
+            throw new IgniteCheckedException("Unable to open destination file. Receiver will will be stopped", e);
         }
 
         long batchSize = Math.min(chunkSize, total - transferred);
@@ -134,6 +128,13 @@ public class FileReceiver extends AbstractReceiver {
 
         if (readed > 0)
             transferred += readed;
+    }
+
+    /** {@inheritDoc} */
+    @Override public void close() throws IOException {
+        U.closeQuiet(fileIo);
+
+        fileIo = null;
     }
 
     /** {@inheritDoc} */
