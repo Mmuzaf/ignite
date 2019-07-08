@@ -101,7 +101,7 @@ public abstract class AbstractReceiver extends AbstractTransferer {
     /**
      * @return Current receiver state written to a {@link TransmitMeta} instance.
      */
-    public TransmitMeta getState() {
+    public TransmitMeta state() {
         return new TransmitMeta(name,
             startPos + transferred,
             total,

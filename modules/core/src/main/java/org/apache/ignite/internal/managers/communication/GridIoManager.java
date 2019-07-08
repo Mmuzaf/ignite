@@ -2629,7 +2629,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                 // Send previous context state to sync remote and local node (on manager connected).
                 TransmitMeta meta = readCtx.lastRcv == null ? new TransmitMeta(readCtx.lastSeenErr) :
-                    readCtx.lastRcv.getState().error(readCtx.lastSeenErr);
+                    readCtx.lastRcv.state().error(readCtx.lastSeenErr);
 
                 meta.writeExternal(out);
 

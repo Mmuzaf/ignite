@@ -103,11 +103,8 @@ public class FileSender extends AbstractTransferer {
         ReadPolicy plc
     ) throws IOException, IgniteCheckedException {
         try {
-            if (fileIo == null) {
+            if (fileIo == null)
                 fileIo = fileIoFactory.create(file);
-
-                fileIo.position(startPos);
-            }
         }
         catch (IOException e) {
             // Consider this IO exeption as a user one (not the network exception) and interrupt upload process.
@@ -116,7 +113,7 @@ public class FileSender extends AbstractTransferer {
 
         // If not the initial connection for the current session.
         if (connMeta != null)
-            setState(connMeta);
+            state(connMeta);
 
         // Send meta about curent file to remote.
         new TransmitMeta(name,
@@ -147,7 +144,7 @@ public class FileSender extends AbstractTransferer {
      * @param connMeta Meta file information about
      * @throws IgniteCheckedException If fails.
      */
-    private void setState(TransmitMeta connMeta) throws IgniteCheckedException {
+    private void state(TransmitMeta connMeta) throws IgniteCheckedException {
         assert connMeta != null;
         assert fileIo != null;
 
@@ -165,14 +162,6 @@ public class FileSender extends AbstractTransferer {
         // No need to set new file position, if it is not changed.
         if (uploadedBytes == 0)
             return;
-
-        try {
-            fileIo.position(startPos + uploadedBytes);
-        }
-        catch (IOException e) {
-            throw new IgniteCheckedException("Unable to set new start file channel position " +
-                "[pos=" + (startPos + uploadedBytes) + ']', e);
-        }
 
         transferred = uploadedBytes;
 
