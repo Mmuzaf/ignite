@@ -34,7 +34,7 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * Class represents base object which can transmit files (read or write) by chunks of
  * predefined size over an opened {@link SocketChannel}.
  */
-abstract class AbstractTransferer implements Closeable {
+abstract class AbstractTransmission implements Closeable {
     /** Node stopping checker. */
     private final Supplier<Boolean> stopChecker;
 
@@ -67,7 +67,7 @@ abstract class AbstractTransferer implements Closeable {
      * @param params Additional stream params.
      * @param stopChecker Node stop or prcoess interrupt checker.
      */
-    protected AbstractTransferer(
+    protected AbstractTransmission(
         String name,
         long startPos,
         long total,
@@ -126,6 +126,6 @@ abstract class AbstractTransferer implements Closeable {
 
     /** {@inheritDoc} */
     @Override public String toString() {
-        return S.toString(AbstractTransferer.class, this);
+        return S.toString(AbstractTransmission.class, this);
     }
 }

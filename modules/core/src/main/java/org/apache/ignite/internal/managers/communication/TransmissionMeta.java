@@ -34,9 +34,9 @@ import static java.util.Optional.ofNullable;
  * Class represents a file meta information to send to a remote node. Used to initiate a new file transfer
  * process or to continue the previous unfinished from the last transmission point.
  */
-public class TransmitMeta implements Externalizable {
+public class TransmissionMeta implements Externalizable {
     /** Default close session instance. The transmit session will be closed if such object received. */
-    public static final TransmitMeta CLOSED = new TransmitMeta("", -1, -1, true, null, null, null, true);
+    public static final TransmissionMeta CLOSED = new TransmissionMeta("", -1, -1, true, null, null, null, true);
 
     /** Serial version uid. */
     private static final long serialVersionUID = 0L;
@@ -60,7 +60,7 @@ public class TransmitMeta implements Externalizable {
     private HashMap<String, Serializable> map = new HashMap<>();
 
     /** Read policy the way of how particular file will be handled. */
-    private ReadPolicy plc;
+    private TransmissionPolicy plc;
 
     /** Last seen error if it has been occurred, or {@code null} the otherwise. */
     private Exception err;
@@ -71,14 +71,14 @@ public class TransmitMeta implements Externalizable {
     /**
      * Default constructor, usually used to create meta to read channel data into.
      */
-    public TransmitMeta() {
+    public TransmissionMeta() {
         this(null);
     }
 
     /**
      * @param err Last seen error if it has been occurred, or {@code null} the otherwise.
      */
-    public TransmitMeta(Exception err) {
+    public TransmissionMeta(Exception err) {
         this("", -1, -1, true, null, null, err, null);
     }
 
@@ -92,13 +92,13 @@ public class TransmitMeta implements Externalizable {
      * @param err Last seen error if it has been occurred, or {@code null} the otherwise.
      * @param exit {@code true} if session must be closed.
      */
-    public TransmitMeta(
+    public TransmissionMeta(
         String name,
         long offset,
         long cnt,
         boolean initial,
         Map<String, Serializable> params,
-        ReadPolicy plc,
+        TransmissionPolicy plc,
         Exception err,
         Boolean exit
     ) {
@@ -155,16 +155,16 @@ public class TransmitMeta implements Externalizable {
     }
 
     /**
-     * @return File read way policy {@link ReadPolicy}.
+     * @return File read way policy {@link TransmissionPolicy}.
      */
-    public ReadPolicy policy() {
+    public TransmissionPolicy policy() {
         return plc;
     }
 
     /**
      * @param err An exception instance if it has been previously occurred.
      */
-    public TransmitMeta error(Exception err) {
+    public TransmissionMeta error(Exception err) {
         this.err = err;
 
         return this;
@@ -204,7 +204,7 @@ public class TransmitMeta implements Externalizable {
             cnt = in.readLong();
             initial = in.readBoolean();
             map = (HashMap)in.readObject();
-            plc = (ReadPolicy)in.readObject();
+            plc = (TransmissionPolicy)in.readObject();
             err = (Exception)in.readObject();
             exit = (Boolean)in.readObject();
         }
@@ -221,7 +221,7 @@ public class TransmitMeta implements Externalizable {
         if (o == null || getClass() != o.getClass())
             return false;
 
-        TransmitMeta meta = (TransmitMeta)o;
+        TransmissionMeta meta = (TransmissionMeta)o;
 
         return offset == meta.offset &&
             cnt == meta.cnt &&
@@ -236,6 +236,6 @@ public class TransmitMeta implements Externalizable {
 
     /** {@inheritDoc} */
     @Override public String toString() {
-        return S.toString(TransmitMeta.class, this);
+        return S.toString(TransmissionMeta.class, this);
     }
 }

@@ -26,8 +26,8 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.internal.managers.communication.ChunkHandler;
-import org.apache.ignite.internal.managers.communication.ReadPolicy;
-import org.apache.ignite.internal.managers.communication.TransmitMeta;
+import org.apache.ignite.internal.managers.communication.TransmissionMeta;
+import org.apache.ignite.internal.managers.communication.TransmissionPolicy;
 import org.apache.ignite.internal.util.typedef.internal.S;
 
 /**
@@ -65,12 +65,12 @@ public class ChunkReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override protected ReadPolicy policy() {
-        return ReadPolicy.CHUNK;
+    @Override protected TransmissionPolicy policy() {
+        return TransmissionPolicy.CHUNK;
     }
 
     /** {@inheritDoc} */
-    @Override protected void init(int chunkSize, TransmitMeta meta) throws IgniteCheckedException {
+    @Override protected void init(int chunkSize, TransmissionMeta meta) throws IgniteCheckedException {
         assert chunkSize > 0;
         assert meta != null;
 

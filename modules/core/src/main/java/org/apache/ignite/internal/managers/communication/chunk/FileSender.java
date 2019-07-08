@@ -27,8 +27,8 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteLogger;
-import org.apache.ignite.internal.managers.communication.ReadPolicy;
-import org.apache.ignite.internal.managers.communication.TransmitMeta;
+import org.apache.ignite.internal.managers.communication.TransmissionMeta;
+import org.apache.ignite.internal.managers.communication.TransmissionPolicy;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
@@ -43,7 +43,7 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * Supports the zero-copy streaming algorithm,  see {@link FileChannel#transferTo(long, long, WritableByteChannel)}
  * for details.
  */
-public class FileSender extends AbstractTransferer {
+public class FileSender extends AbstractTransmission {
     /** Ignite logger. */
     private final IgniteLogger log;
 
@@ -99,8 +99,8 @@ public class FileSender extends AbstractTransferer {
      */
     public void send(WritableByteChannel ch,
         ObjectOutput oo,
-        @Nullable TransmitMeta connMeta,
-        ReadPolicy plc
+        @Nullable TransmissionMeta connMeta,
+        TransmissionPolicy plc
     ) throws IOException, IgniteCheckedException {
         try {
             if (fileIo == null)
@@ -116,7 +116,7 @@ public class FileSender extends AbstractTransferer {
             state(connMeta);
 
         // Send meta about curent file to remote.
-        new TransmitMeta(name,
+        new TransmissionMeta(name,
             startPos + transferred,
             total - transferred,
             transferred == 0,
@@ -144,7 +144,7 @@ public class FileSender extends AbstractTransferer {
      * @param connMeta Meta file information about
      * @throws IgniteCheckedException If fails.
      */
-    private void state(TransmitMeta connMeta) throws IgniteCheckedException {
+    private void state(TransmissionMeta connMeta) throws IgniteCheckedException {
         assert connMeta != null;
         assert fileIo != null;
 

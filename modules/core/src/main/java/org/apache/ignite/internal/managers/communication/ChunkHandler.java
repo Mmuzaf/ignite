@@ -27,11 +27,11 @@ import org.apache.ignite.IgniteCheckedException;
  */
 public interface ChunkHandler extends Closeable {
     /**
-     * @param offset Offset pointer of downloaded file in original source.
-     * @param cnt Number of bytes to expect from source started on given offset.
+     * @param startPos Offset pointer of downloaded file in original source.
+     * @param cnt Number of bytes to expect from source started on given start position.
      * @throws IgniteCheckedException If fails.
      */
-    public void open(long offset, long cnt) throws IgniteCheckedException;
+    public void open(long startPos, long cnt) throws IgniteCheckedException;
 
     /**
      * @return The size of of {@link ByteBuffer} to read the input channel into.

@@ -188,7 +188,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     private final ConcurrentMap<Object, TransmissionHandler> topicTransmitHnds = new ConcurrentHashMap<>();
 
     /** The map of already known channel read contexts by its registered topics. */
-    private final ConcurrentMap<Object, FileReadContext> readSesCtxs = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Object, ReceiverContext> rcvCtxs = new ConcurrentHashMap<>();
 
     /** The map of sessions which are currently writing files and their corresponding interruption flags. */
     private final ConcurrentMap<T2<UUID, IgniteUuid>, AtomicBoolean> fileWriterStopFlags = new ConcurrentHashMap<>();
@@ -827,8 +827,8 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                             }
 
                             // Clear the context on the uploader node left.
-                            for (Map.Entry<Object, FileReadContext> sesEntry : readSesCtxs.entrySet()) {
-                                FileReadContext ioctx = sesEntry.getValue();
+                            for (Map.Entry<Object, ReceiverContext> sesEntry : rcvCtxs.entrySet()) {
+                                ReceiverContext ioctx = sesEntry.getValue();
 
                                 if (ioctx.nodeId.equals(nodeId)) {
                                     ioctx.hnd.onException(nodeId,
@@ -837,7 +837,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                                     ioctx.interrupted = true;
 
-                                    readSesCtxs.remove(sesEntry.getKey());
+                                    rcvCtxs.remove(sesEntry.getKey());
                                 }
                             }
                         }
@@ -1758,12 +1758,12 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
     /**
      * @param topic The {@link GridTopic} to register handler to.
-     * @param ses The session will be created for a new channel opened.
+     * @param hnd Handler which will handle file upload requests.
      */
-    public void addTransmissionHandler(Object topic, TransmissionHandler ses) {
-        TransmissionHandler hnd = topicTransmitHnds.putIfAbsent(topic, ses);
+    public void addTransmissionHandler(Object topic, TransmissionHandler hnd) {
+        TransmissionHandler hnd0 = topicTransmitHnds.putIfAbsent(topic, hnd);
 
-        if (hnd != null)
+        if (hnd0 != null)
             U.warn(log, "The topic already have an appropriate session handler [topic=" + topic + ']');
     }
 
@@ -2558,35 +2558,34 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     }
 
     /**
-     * Check the node is stopping.
-     */
-    private void throwExIfStopping() throws NodeStoppingException {
-        if (stopping)
-            throw new NodeStoppingException("Operation has been cancelled (node is stopping)");
-    }
-
-    /**
      * @param topic Topic to which the channel is created.
      * @param nodeId Remote node id.
      * @param initMsg Channel initialization message with additional params.
      * @param channel Channel instance.
      */
     private void processOpenedChannel(Object topic, UUID nodeId, SessionChannelMessage initMsg, SocketChannel channel) {
-        FileReadContext readCtx = null;
+        ReceiverContext rcvCtx = null;
         IgniteUuid newSesId = null;
         ObjectInputStream in = null;
         ObjectOutputStream out = null;
 
         try {
-            TransmissionHandler ses = topicTransmitHnds.get(topic);
+            TransmissionHandler hnd = topicTransmitHnds.get(topic);
 
-            if (ses == null)
+            if (hnd == null) {
+                U.warn(log, "There is no handler for given topic. Opened channel will be closed [nodeId=" + nodeId +
+                    ", topic=" + topic + ']');
                 return;
+            }
 
-            if (initMsg == null || initMsg.sesId() == null)
+            if (initMsg == null || initMsg.sesId() == null) {
+                U.warn(log, "There is no initial message provied for given topic. Opened channel will be closed " +
+                    "[nodeId=" + nodeId + ", topic=" + topic + ']');
+
                 return;
+            }
 
-            readCtx = readSesCtxs.computeIfAbsent(topic, t -> new FileReadContext(nodeId, ses));
+            rcvCtx = rcvCtxs.computeIfAbsent(topic, t -> new ReceiverContext(nodeId, hnd));
 
             configureChannel(ctx.config(), channel);
 
@@ -2594,14 +2593,14 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
             out = new ObjectOutputStream(channel.socket().getOutputStream());
 
             // Do not allow multiple connection for the same session id;
-            if (!readCtx.inProgress.compareAndSet(false, true)) {
+            if (!rcvCtx.inProgress.compareAndSet(false, true)) {
                 IgniteCheckedException ex;
 
                 U.warn(log, ex = new IgniteCheckedException("Current topic is already being handled by " +
                     "another thread. Channel will be closed [initMsg=" + initMsg + ", channel=" + channel +
                     ", fromNodeId=" + nodeId + ']'));
 
-                new TransmitMeta(ex).writeExternal(out);
+                new TransmissionMeta(ex).writeExternal(out);
 
                 return;
             }
@@ -2612,43 +2611,36 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
             try {
                 newSesId = initMsg.sesId();
 
-                if (readCtx.sesId == null)
-                    readCtx.sesId = newSesId;
-                else if (!readCtx.sesId.equals(newSesId)) {
+                if (rcvCtx.sesId == null)
+                    rcvCtx.sesId = newSesId;
+                else if (!rcvCtx.sesId.equals(newSesId)) {
                     // Attempt to receive file with new session id. Context must be reinited,
                     // previous session must be failed.
-                    readCtx.hnd.onException(nodeId, new IgniteCheckedException("The handler has been aborted " +
+                    rcvCtx.hnd.onException(nodeId, new IgniteCheckedException("The handler has been aborted " +
                         "by transfer attempt with a new sessionId: " + newSesId));
 
-                    readCtx = new FileReadContext(nodeId, ses);
-                    readCtx.sesId = newSesId;
-                    readCtx.inProgress.set(true);
+                    rcvCtx = new ReceiverContext(nodeId, hnd);
+                    rcvCtx.sesId = newSesId;
+                    rcvCtx.inProgress.set(true);
 
-                    readSesCtxs.put(topic, readCtx);
+                    rcvCtxs.put(topic, rcvCtx);
                 }
 
                 // Send previous context state to sync remote and local node (on manager connected).
-                TransmitMeta meta = readCtx.lastRcv == null ? new TransmitMeta(readCtx.lastSeenErr) :
-                    readCtx.lastRcv.state().error(readCtx.lastSeenErr);
+                TransmissionMeta meta = rcvCtx.lastRcv == null ? new TransmissionMeta(rcvCtx.lastSeenErr) :
+                    rcvCtx.lastRcv.state().error(rcvCtx.lastSeenErr);
 
                 meta.writeExternal(out);
 
-                try {
-                    // Begin method must be called only once.
-                    if (!readCtx.sesBegin) {
-                        readCtx.hnd.onBegin(nodeId);
+                // Begin method must be called only once.
+                if (!rcvCtx.sesBegin) {
+                    rcvCtx.hnd.onBegin(nodeId);
 
-                        readCtx.sesBegin = true;
-                    }
-                }
-                catch (Throwable t) {
-                    readCtx.sesBegin = false;
-
-                    throw t;
+                    rcvCtx.sesBegin = true;
                 }
             }
             catch (Throwable t) {
-                readCtx.inProgress.set(false);
+                rcvCtx.inProgress.set(false);
 
                 throw t;
             }
@@ -2656,16 +2648,16 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 busyLock.readLock().unlock();
             }
 
-            processOpenedChannel0(topic, readCtx, in, out, channel);
+            processOpenedChannel0(topic, rcvCtx, in, out, channel);
         }
         catch (Throwable t) {
             U.error(log, "The download session cannot be finished due to unexpected error " +
-                "[ctx=" + readCtx + ", sesKey=" + newSesId + ']', t);
+                "[ctx=" + rcvCtx + ", sesKey=" + newSesId + ']', t);
 
-            if (readCtx != null) {
-                readCtx.lastSeenErr = new IgniteCheckedException("Channel processing error [nodeId=" + nodeId + ']', t);
+            if (rcvCtx != null) {
+                rcvCtx.lastSeenErr = new IgniteCheckedException("Channel processing error [nodeId=" + nodeId + ']', t);
 
-                readCtx.hnd.onException(nodeId, t);
+                rcvCtx.hnd.onException(nodeId, t);
             }
         }
         finally {
@@ -2677,12 +2669,12 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
     /**
      * @param topic Topic handler related to.
-     * @param readCtx The handler read context.
+     * @param rcvCtx Receiver read context.
      * @throws Exception If processing fails.
      */
     private void processOpenedChannel0(
         Object topic,
-        FileReadContext readCtx,
+        ReceiverContext rcvCtx,
         ObjectInputStream in,
         ObjectOutputStream out,
         ReadableByteChannel channel
@@ -2692,28 +2684,29 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 if (Thread.currentThread().isInterrupted())
                     throw new InterruptedException("The thread has been interrupted. Stop downloading file.");
 
-                throwExIfStopping();
+                if (stopping)
+                    throw new NodeStoppingException("Operation has been cancelled (node is stopping)");
 
-                TransmitMeta meta = new TransmitMeta();
+                TransmissionMeta meta = new TransmissionMeta();
 
                 meta.readExternal(in);
 
                 if (meta.exit()) {
-                    readCtx.hnd.onEnd(readCtx.nodeId);
+                    rcvCtx.hnd.onEnd(rcvCtx.nodeId);
 
-                    readSesCtxs.remove(topic);
+                    rcvCtxs.remove(topic);
 
                     break;
                 }
 
-                if (readCtx.lastRcv == null) {
-                    readCtx.lastRcv = createChunkReceiver(readCtx.nodeId,
-                        readCtx.hnd,
+                if (rcvCtx.lastRcv == null) {
+                    rcvCtx.lastRcv = createChunkReceiver(rcvCtx.nodeId,
+                        rcvCtx.hnd,
                         meta,
-                        () -> stopping || readCtx.interrupted);
+                        () -> stopping || rcvCtx.interrupted);
                 }
 
-                try (AbstractReceiver rcv = readCtx.lastRcv) {
+                try (AbstractReceiver rcv = rcvCtx.lastRcv) {
                     long startTime = U.currentTimeMillis();
 
                     rcv.receive(channel, meta, chunkSize);
@@ -2722,31 +2715,31 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     out.writeLong(rcv.transferred());
                     out.flush();
 
-                    readCtx.lastRcv = null;
+                    rcvCtx.lastRcv = null;
 
                     long downloadTime = U.currentTimeMillis() - startTime;
 
                     U.log(log, "File has been received " +
                         "[name=" + rcv.name() + ", transferred=" + rcv.transferred() +
                         ", time=" + (double)((downloadTime) / 1000) + " sec" +
-                        ", retries=" + readCtx.retries + ", remoteId=" + readCtx.nodeId + ']');
+                        ", retries=" + rcvCtx.retries + ", remoteId=" + rcvCtx.nodeId + ']');
                 }
             }
         }
         catch (IOException e) {
             // Waiting for re-establishing connection.
             U.warn(log, "Сonnection from the remote node lost. Will wait for the new one to continue file " +
-                "download " + "[nodeId=" + readCtx.nodeId + ", sesKey=" + readCtx.sesId + ']', e);
+                "download " + "[nodeId=" + rcvCtx.nodeId + ", sesKey=" + rcvCtx.sesId + ']', e);
 
-            readCtx.retries++;
+            rcvCtx.retries++;
 
-            if (readCtx.retries == retryCnt) {
+            if (rcvCtx.retries == retryCnt) {
                 throw new IgniteCheckedException("Number of retry attempts to download file exceeded the limit. " +
                     "Max attempts: " + retryCnt, e);
             }
         }
         finally {
-            readCtx.inProgress.set(false);
+            rcvCtx.inProgress.set(false);
         }
     }
 
@@ -2771,7 +2764,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     private AbstractReceiver createChunkReceiver(
         UUID nodeId,
         TransmissionHandler handler,
-        TransmitMeta meta,
+        TransmissionMeta meta,
         Supplier<Boolean> stopChecker
     ) throws IgniteCheckedException {
         assertParameter(meta.initial(), "Read operation stopped. Attempt to receive a new file from channel, " +
@@ -2845,7 +2838,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     /**
      * Read context holds all the information about current transfer read from channel process.
      */
-    private static class FileReadContext {
+    private static class ReceiverContext {
         /** The remote node input channel came from. */
         private final UUID nodeId;
 
@@ -2878,14 +2871,14 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
          * @param nodeId Remote node id.
          * @param hnd Channel handler of current topic.
          */
-        public FileReadContext(UUID nodeId, TransmissionHandler hnd) {
+        public ReceiverContext(UUID nodeId, TransmissionHandler hnd) {
             this.nodeId = nodeId;
             this.hnd = hnd;
         }
 
         /** {@inheritDoc} */
         @Override public String toString() {
-            return S.toString(FileReadContext.class, this);
+            return S.toString(ReceiverContext.class, this);
         }
     }
 
@@ -2962,7 +2955,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
          * @throws IgniteCheckedException If fails.
          * @throws IOException If fails.
          */
-        private TransmitMeta connect() throws IgniteCheckedException, IOException {
+        private TransmissionMeta connect() throws IgniteCheckedException, IOException {
             fileWriterStopFlags.putIfAbsent(sesKey, new AtomicBoolean());
 
             SocketChannel channel = (SocketChannel)openChannel(remoteId,
@@ -2977,7 +2970,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
             in = new ObjectInputStream(channel.socket().getInputStream());
 
             // Synchronize state between remote and local nodes.
-            TransmitMeta syncMeta = new TransmitMeta();
+            TransmissionMeta syncMeta = new TransmissionMeta();
 
             syncMeta.readExternal(in);
 
@@ -2993,7 +2986,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         public void write(
             File file,
             Map<String, Serializable> params,
-            ReadPolicy plc
+            TransmissionPolicy plc
         ) throws IgniteCheckedException {
             write(file, 0, file.length(), params, plc);
         }
@@ -3005,7 +2998,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
          */
         public void write(
             File file,
-            ReadPolicy plc
+            TransmissionPolicy plc
         ) throws IgniteCheckedException {
             write(file, 0, file.length(), new HashMap<>(), plc);
         }
@@ -3023,7 +3016,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
             long offset,
             long cnt,
             Map<String, Serializable> params,
-            ReadPolicy plc
+            TransmissionPolicy plc
         ) throws IgniteCheckedException {
             try (FileSender snd = new FileSender(file,
                 offset,
@@ -3034,9 +3027,10 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 fileIoFactory,
                 chunkSize)
             ) {
-                if (log.isDebugEnabled())
+                if (log.isDebugEnabled()) {
                     log.debug("Start writing file to remote node [file=" + file.getName() +
                         ", rmtNodeId=" + remoteId + ", topic=" + topic + ']');
+                }
 
                 long startTime = U.currentTimeMillis();
                 int retries = 0;
@@ -3045,10 +3039,11 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     if (Thread.currentThread().isInterrupted())
                         throw new InterruptedException("The thread has been interrupted. Stop uploading file.");
 
-                    throwExIfStopping();
+                    if (stopping)
+                        throw new NodeStoppingException("Operation has been cancelled (node is stopping)");
 
                     try {
-                        TransmitMeta connMeta = null;
+                        TransmissionMeta connMeta = null;
 
                         if (out == null && in == null) {
                             connMeta = connect();
@@ -3110,7 +3105,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 if (out != null) {
                     U.log(log, "Close file writer session: " + sesKey);
 
-                    TransmitMeta.CLOSED.writeExternal(out);
+                    TransmissionMeta.CLOSED.writeExternal(out);
                 }
             }
             catch (IOException e) {

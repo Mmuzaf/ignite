@@ -198,7 +198,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
                     new HashMap<String, Serializable>() {{
                         put(file.getName(), file.hashCode());
                     }},
-                    ReadPolicy.FILE);
+                    TransmissionPolicy.FILE);
             }
         }
 
@@ -257,7 +257,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.FILE);
+            writer.write(fileToSend, TransmissionPolicy.FILE);
         }
     }
 
@@ -305,7 +305,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.FILE);
+            writer.write(fileToSend, TransmissionPolicy.FILE);
         }
     }
 
@@ -356,7 +356,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.FILE);
+            writer.write(fileToSend, TransmissionPolicy.FILE);
         }
     }
 
@@ -397,7 +397,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.FILE);
+            writer.write(fileToSend, TransmissionPolicy.FILE);
         }
 
         assertEquals(fileToSend.length(), rcvFile.length());
@@ -446,7 +446,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.FILE);
+            writer.write(fileToSend, TransmissionPolicy.FILE);
         }
         catch (IgniteCheckedException e) {
             // Expected exception.
@@ -457,7 +457,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.FILE);
+            writer.write(fileToSend, TransmissionPolicy.FILE);
         }
 
         assertEquals(fileToSend.length(), rcvFile.length());
@@ -472,7 +472,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.FILE);
+            writer.write(fileToSend, TransmissionPolicy.FILE);
         }
         catch (IgniteCheckedException e) {
             // Must catch execption here.
@@ -527,7 +527,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             // Will connect on write attempt.
             GridTestUtils.runAsync(() -> {
                 try {
-                    writer.write(fileToSend, ReadPolicy.FILE);
+                    writer.write(fileToSend, TransmissionPolicy.FILE);
                 }
                 catch (IgniteCheckedException e) {
                     errs[0] = e;
@@ -539,7 +539,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
 
             GridTestUtils.runAsync(() -> {
                 try {
-                    anotherWriter.write(fileToSend, ReadPolicy.FILE);
+                    anotherWriter.write(fileToSend, TransmissionPolicy.FILE);
                 }
                 catch (IgniteCheckedException e) {
                     errs[0] = e;
@@ -602,12 +602,12 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             @Override public ChunkHandler chunkHandler(UUID nodeId, String name, long offset, long cnt,
                 Map<String, Serializable> params) throws IgniteCheckedException {
                 return new ChunkHandler() {
-                    @Override public void open(long offset, long cnt) throws IgniteCheckedException {
+                    @Override public void open(long startPos, long cnt) throws IgniteCheckedException {
                         if (fileIo[0] == null) {
                             try {
                                 fileIo[0] = IO_FACTORY.create(file);
 
-                                fileIo[0].position(offset);
+                                fileIo[0].position(startPos);
                             }
                             catch (IOException e) {
                                 throw new IgniteCheckedException(e);
@@ -645,7 +645,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.CHUNK);
+            writer.write(fileToSend, TransmissionPolicy.CHUNK);
         }
 
         assertEquals("Total number of accepted chunks by remote node is not as expected",
@@ -672,7 +672,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             @Override public ChunkHandler chunkHandler(UUID nodeId, String name, long offset, long cnt,
                 Map<String, Serializable> params) {
                 return new ChunkHandler() {
-                    @Override public void open(long offset, long cnt) throws IgniteCheckedException {
+                    @Override public void open(long startPos, long cnt) throws IgniteCheckedException {
                         // No-op.
                     }
 
@@ -694,7 +694,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.CHUNK);
+            writer.write(fileToSend, TransmissionPolicy.CHUNK);
         }
     }
 

@@ -23,8 +23,8 @@ import java.nio.channels.ReadableByteChannel;
 import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
-import org.apache.ignite.internal.managers.communication.ReadPolicy;
-import org.apache.ignite.internal.managers.communication.TransmitMeta;
+import org.apache.ignite.internal.managers.communication.TransmissionMeta;
+import org.apache.ignite.internal.managers.communication.TransmissionPolicy;
 
 import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
 
@@ -32,7 +32,7 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * Class represents a receiver of data which can be pulled from a channel by chunks of
  * predefined size. Closes when a transmission of represented object ends.
  */
-public abstract class AbstractReceiver extends AbstractTransferer {
+public abstract class AbstractReceiver extends AbstractTransmission {
     /**
      * @param name The unique file name within transfer process.
      * @param startPos The position from which the transfer should start to.
@@ -66,7 +66,7 @@ public abstract class AbstractReceiver extends AbstractTransferer {
      */
     public void receive(
         ReadableByteChannel ch,
-        TransmitMeta meta,
+        TransmissionMeta meta,
         int chunkSize
     ) throws IOException, IgniteCheckedException {
         assert meta != null;
@@ -99,10 +99,10 @@ public abstract class AbstractReceiver extends AbstractTransferer {
     }
 
     /**
-     * @return Current receiver state written to a {@link TransmitMeta} instance.
+     * @return Current receiver state written to a {@link TransmissionMeta} instance.
      */
-    public TransmitMeta state() {
-        return new TransmitMeta(name,
+    public TransmissionMeta state() {
+        return new TransmissionMeta(name,
             startPos + transferred,
             total,
             transferred == 0,
@@ -115,14 +115,14 @@ public abstract class AbstractReceiver extends AbstractTransferer {
     /**
      * @return Read policy of data handling.
      */
-    protected abstract ReadPolicy policy();
+    protected abstract TransmissionPolicy policy();
 
     /**
      * @param chunkSize Size of chunks.
      * @param meta Meta information about receiving file.
      * @throws IgniteCheckedException If fails.
      */
-    protected abstract void init(int chunkSize, TransmitMeta meta) throws IgniteCheckedException;
+    protected abstract void init(int chunkSize, TransmissionMeta meta) throws IgniteCheckedException;
 
     /**
      * @param ch Channel to read data from.

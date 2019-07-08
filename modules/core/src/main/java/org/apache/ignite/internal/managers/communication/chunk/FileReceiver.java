@@ -26,8 +26,8 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.internal.managers.communication.FileHandler;
-import org.apache.ignite.internal.managers.communication.ReadPolicy;
-import org.apache.ignite.internal.managers.communication.TransmitMeta;
+import org.apache.ignite.internal.managers.communication.TransmissionMeta;
+import org.apache.ignite.internal.managers.communication.TransmissionPolicy;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
@@ -84,7 +84,7 @@ public class FileReceiver extends AbstractReceiver {
     /** {@inheritDoc} */
     @Override public void receive(
         ReadableByteChannel ch,
-        TransmitMeta meta,
+        TransmissionMeta meta,
         int chunkSize
     ) throws IOException, IgniteCheckedException {
         super.receive(ch, meta, chunkSize);
@@ -94,12 +94,12 @@ public class FileReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override protected ReadPolicy policy() {
-        return ReadPolicy.FILE;
+    @Override protected TransmissionPolicy policy() {
+        return TransmissionPolicy.FILE;
     }
 
     /** {@inheritDoc} */
-    @Override protected void init(int chunkSize, TransmitMeta meta) throws IgniteCheckedException {
+    @Override protected void init(int chunkSize, TransmissionMeta meta) throws IgniteCheckedException {
         assert chunkSize > 0;
         assert meta != null;
 
