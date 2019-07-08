@@ -27,6 +27,7 @@ import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.internal.managers.communication.ChunkHandler;
 import org.apache.ignite.internal.managers.communication.ReadPolicy;
+import org.apache.ignite.internal.managers.communication.TransmitMeta;
 import org.apache.ignite.internal.util.typedef.internal.S;
 
 /**
@@ -65,25 +66,30 @@ public class ChunkReceiver extends AbstractReceiver {
 
     /** {@inheritDoc} */
     @Override protected ReadPolicy policy() {
-        return ReadPolicy.BUFF;
+        return ReadPolicy.CHUNK;
     }
 
     /** {@inheritDoc} */
-    @Override protected void init(int chunkSize) throws IgniteCheckedException {
-        assert buf == null;
+    @Override protected void init(int chunkSize, TransmitMeta meta) throws IgniteCheckedException {
+        assert chunkSize > 0;
+        assert meta != null;
 
         int buffSize = hnd.size();
 
         int size = buffSize > 0 ? buffSize : chunkSize;
 
-        chunkSize(size);
+        this.chunkSize = size;
 
         buf = ByteBuffer.allocate(size);
         buf.order(ByteOrder.nativeOrder());
+
+        hnd.open(meta.offset(), meta.count());
     }
 
     /** {@inheritDoc} */
     @Override protected void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
+        assert buf != null : "Buffer is used to deilver readed data to the used and cannot be null: " + this;
+
         buf.rewind();
 
         int readed = 0;
@@ -94,9 +100,12 @@ public class ChunkReceiver extends AbstractReceiver {
         while (true) {
             res = ch.read(buf);
 
+            // Read will return -1 if remote node close connection.
             if (res < 0) {
-                if (transferred + readed != total)
-                    throw new IOException("Input data channel reached its end, but chunked object has not fully loaded");
+                if (transferred + readed != total) {
+                    throw new IOException("Input data channel reached its end, but file has not fully loaded " +
+                        "[transferred=" + transferred + ", readed=" + readed + ", total=" + total + ']');
+                }
 
                 break;
             }
@@ -119,9 +128,9 @@ public class ChunkReceiver extends AbstractReceiver {
 
     /** {@inheritDoc} */
     @Override public void close() throws IOException {
-        buf = null;
-
         hnd.close();
+
+        buf = null;
     }
 
     /** {@inheritDoc} */

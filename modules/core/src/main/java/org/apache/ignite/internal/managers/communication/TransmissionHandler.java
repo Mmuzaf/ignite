@@ -57,8 +57,6 @@ public interface TransmissionHandler {
     /**
      * @param nodeId The remote node id receive request for transmission from.
      * @param name File name transferred from remote.
-     * @param offset Offset pointer of downloaded file in original source.
-     * @param cnt Number of bytes transferred from source started from given offset.
      * @param params Additional transfer file description params.
      * @return The intance of read handler to process incoming data like the {@link FileChannel} manner.
      * @throws IgniteCheckedException If fails.

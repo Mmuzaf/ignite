@@ -33,9 +33,6 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * predefined size. Closes when a transmission of represented object ends.
  */
 public abstract class AbstractReceiver extends AbstractTransferer {
-    /** Initialization completion flag. */
-    private boolean inited;
-
     /**
      * @param name The unique file name within transfer process.
      * @param startPos The position from which the transfer should start to.
@@ -62,6 +59,8 @@ public abstract class AbstractReceiver extends AbstractTransferer {
 
     /**
      * @param ch Input channel to read data from.
+     * @param meta Meta information about receiving file.
+     * @param chunkSize Size of chunks for receiver.
      * @throws IOException If an io exception occurred.
      * @throws IgniteCheckedException If some check failed.
      */
@@ -73,29 +72,18 @@ public abstract class AbstractReceiver extends AbstractTransferer {
         assert meta != null;
         assert chunkSize > 0;
 
-        if (meta.initial()) {
-            assertParameter(!inited, "Read operation stopped. Attempt to receive a new file from channel, " +
-                "while the previous was not fully loaded [new=" + meta.name() + ", old=" + name + ']');
+        assertParameter(name.equals(meta.name()), "Attempt to load different file " +
+            "[name=" + name + ", meta=" + meta + ']');
 
-            init(chunkSize);
+        assertParameter(startPos + transferred == meta.offset(),
+            "The next chunk offest is incorrect [startPos=" + startPos +
+                ", transferred=" + transferred + ", meta=" + meta + ']');
 
-            inited = true;
-        }
-        else {
-            assertParameter(inited, "Read operation stopped. Recevier must be initialized " +
-                "[meta=" + meta + ']');
+        assertParameter(total == meta.count() + transferred, " The count of bytes to transfer for " +
+            "the next chunk is incorrect [total=" + total + ", transferred=" + transferred +
+            ", startPos=" + startPos + ", meta=" + meta + ']');
 
-            assertParameter(name.equals(meta.name()), "Attempt to load different file " +
-                "[name=" + name + ", meta=" + meta + ']');
-
-            assertParameter(startPos + transferred == meta.offset(),
-                "The next chunk offest is incorrect [startPos=" + startPos +
-                    ", transferred=" + transferred + ", meta=" + meta + ']');
-
-            assertParameter(total == meta.total(), " The count of bytes to transfer for " +
-                "the next chunk is incorrect [total=" + total + ", transferred=" + transferred +
-                ", startPos=" + startPos + ", meta=" + meta + ']');
-        }
+        init(chunkSize, meta);
 
         // Read data from the input.
         while (hasNextChunk()) {
@@ -130,10 +118,11 @@ public abstract class AbstractReceiver extends AbstractTransferer {
     protected abstract ReadPolicy policy();
 
     /**
-     * @param chunkSize The size of chunk to read.
+     * @param chunkSize Size of chunks.
+     * @param meta Meta information about receiving file.
      * @throws IgniteCheckedException If fails.
      */
-    protected abstract void init(int chunkSize) throws IgniteCheckedException;
+    protected abstract void init(int chunkSize, TransmitMeta meta) throws IgniteCheckedException;
 
     /**
      * @param ch Channel to read data from.

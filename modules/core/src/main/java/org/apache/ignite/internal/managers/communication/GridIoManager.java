@@ -2726,10 +2726,10 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                     long downloadTime = U.currentTimeMillis() - startTime;
 
-                    U.log(log, "The file has been successfully downloaded " +
-                        "[name=" + rcv.name() + ", transferred=" + rcv.transferred() + " bytes" +
+                    U.log(log, "File has been received " +
+                        "[name=" + rcv.name() + ", transferred=" + rcv.transferred() +
                         ", time=" + (double)((downloadTime) / 1000) + " sec" +
-                        ", retries=" + readCtx.retries);
+                        ", retries=" + readCtx.retries + ", remoteId=" + readCtx.nodeId + ']');
                 }
             }
         }
@@ -2774,32 +2774,35 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         TransmitMeta meta,
         Supplier<Boolean> stopChecker
     ) throws IgniteCheckedException {
+        assertParameter(meta.initial(), "Read operation stopped. Attempt to receive a new file from channel, " +
+            "while the previous was not fully loaded [meta=" + meta + ']');
+
         switch (meta.policy()) {
             case FILE:
                 return new FileReceiver(
                     meta.name(),
                     meta.offset(),
-                    meta.total(),
+                    meta.count(),
                     meta.params(),
                     stopChecker,
                     fileIoFactory,
                     handler.fileHandler(nodeId,
                         meta.name(),
                         meta.offset(),
-                        meta.total(),
+                        meta.count(),
                         meta.params()));
 
-            case BUFF:
+            case CHUNK:
                 return new ChunkReceiver(
                     meta.name(),
                     meta.offset(),
-                    meta.total(),
+                    meta.count(),
                     meta.params(),
                     stopChecker,
                     handler.chunkHandler(nodeId,
                         meta.name(),
                         meta.offset(),
-                        meta.total(),
+                        meta.count(),
                         meta.params()));
 
             default:
@@ -3027,6 +3030,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 cnt,
                 params,
                 () -> stopping || fileWriterStopFlags.get(sesKey).get(),
+                log,
                 fileIoFactory,
                 chunkSize)
             ) {
@@ -3085,9 +3089,9 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                 long uploadTime = U.currentTimeMillis() - startTime;
 
-                U.log(log, "The file uploading operation has been completed " +
-                    "[name=" + file.getName() + ", uploadTime=" + (double)((uploadTime) / 1000) + " sec" +
-                    ", retries=" + retries + ']');
+                U.log(log, "File has been sent [name=" + file.getName() +
+                    ", uploadTime=" + (double)((uploadTime) / 1000) + " sec, retries=" + retries +
+                    ", transferred=" + snd.transferred() + ", remoteId=" + remoteId +']');
 
             }
             catch (Exception e) {
@@ -3104,7 +3108,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 fileWriterStopFlags.remove(sesKey);
 
                 if (out != null) {
-                    U.log(log, "File writer session will be closed.");
+                    U.log(log, "Close file writer session: " + sesKey);
 
                     TransmitMeta.CLOSED.writeExternal(out);
                 }

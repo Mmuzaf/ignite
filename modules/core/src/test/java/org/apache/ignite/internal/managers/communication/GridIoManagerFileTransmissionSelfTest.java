@@ -81,6 +81,9 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
     /** File filter. */
     private static FilenameFilter fileBinFilter;
 
+    /** Locally used fileIo to interact with output file. */
+    private final FileIO[] fileIo = new FileIO[1];
+
     /** The temporary directory to store files. */
     private File tempStore;
 
@@ -114,6 +117,8 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
     @After
     public void after() throws Exception {
         stopAllGrids();
+
+        U.closeQuiet(fileIo[0]);
     }
 
     /** {@inheritDoc} */
@@ -260,7 +265,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
      * @throws Exception If fails.
      */
     @Test(expected = IgniteCheckedException.class)
-    public void testFileHandlerOnrcvNodeLeft() throws Exception {
+    public void testFileHandlerOnReceiverNodeLeft() throws Exception {
         final int fileSizeBytes = 5 * 1024 * 1024;
         final AtomicInteger chunksCnt = new AtomicInteger();
 
@@ -321,10 +326,10 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
 
         rcv.context().io().transfererFileIoFactory(new FileIOFactory() {
             @Override public FileIO create(File file, OpenOption... modes) throws IOException {
-                FileIO fileIo = IO_FACTORY.create(file, modes);
+                fileIo[0] = IO_FACTORY.create(file, modes);
 
                 // Blocking writer and stopping node FileIo.
-                return new FileIODecorator(fileIo) {
+                return new FileIODecorator(fileIo[0]) {
                     @Override public long transferFrom(ReadableByteChannel src, long position, long count)
                         throws IOException {
                         // Read 4 chunks than throw an exception to emulate error processing.
@@ -369,6 +374,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         snd.cluster().active(true);
 
         File fileToSend = createFileRandomData("testFile", fileSizeBytes);
+        File rcvFile = new File(tempStore, "testFile" + "_" + rcv.localNode().id());
 
         rcv.context().io().addTransmissionHandler(topic, new TransmissionHandlerAdapter() {
             @Override public FileHandler fileHandler(UUID nodeId, String name, long offset, long cnt,
@@ -378,13 +384,11 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
                         if (throwFirstTime.compareAndSet(false, true))
                             throw new IgniteException("Test exception. Initialization fail.");
 
-                        return new File(tempStore, name + "_" + rcv.localNode().id())
-                            .getAbsolutePath();
+                        return rcvFile.getAbsolutePath();
                     }
 
                     @Override public void accept(File file) {
-                        assertEquals(fileToSend.length(), file.length());
-                        assertCrcEquals(fileToSend, file);
+                        // No-op.
                     }
                 };
             }
@@ -395,6 +399,9 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             .openFileWriter(rcv.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.FILE);
         }
+
+        assertEquals(fileToSend.length(), rcvFile.length());
+        assertCrcEquals(fileToSend, rcvFile);
     }
 
     /**
@@ -411,6 +418,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         snd.cluster().active(true);
 
         File fileToSend = createFileRandomData("File_5MB", fileSizeBytes);
+        File rcvFile = new File(tempStore, "File_5MB" + "_" + rcv.localNode().id());
 
         rcv.context().io().addTransmissionHandler(topic, new TransmissionHandlerAdapter() {
             @Override public void onException(UUID nodeId, Throwable err) {
@@ -425,13 +433,11 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
                         if (networkExThrown.compareAndSet(false, true))
                             return null;
 
-                        return new File(tempStore, name + "_" + rcv.localNode().id())
-                            .getAbsolutePath();
+                        return rcvFile.getAbsolutePath();
                     }
 
                     @Override public void accept(File file) {
-                        assertEquals(fileToSend.length(), file.length());
-                        assertCrcEquals(fileToSend, file);
+                        assertEquals(file.getAbsolutePath(), rcvFile.getAbsolutePath());
                     }
                 };
             }
@@ -453,6 +459,9 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             .openFileWriter(rcv.localNode().id(), topic)) {
             writer.write(fileToSend, ReadPolicy.FILE);
         }
+
+        assertEquals(fileToSend.length(), rcvFile.length());
+        assertCrcEquals(fileToSend, rcvFile);
 
         // Remove topic handler and fail
         rcv.context().io().removeTransmissionHandler(topic);
@@ -556,33 +565,58 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
      * @throws Exception If fails.
      */
     @Test
-    public void testChunkHandlerBase() throws Exception {
-        final FileIO[] fileIo = new FileIO[1];
-
+    public void testChunkHandlerWithReconnect() throws Exception {
         IgniteEx snd = startGrid(0);
         IgniteEx rcv = startGrid(1);
 
+        final String filePrefix = "testFile";
+        final int chunkSize = 1024;
+        final AtomicInteger cnt = new AtomicInteger();
+        final AtomicInteger acceptedChunks = new AtomicInteger();
+        final File file = new File(tempStore, filePrefix + "_" + rcv.localNode().id());
+
         snd.cluster().active(true);
 
-        File fileToSend = createFileRandomData("testFile", 10 * 1024 * 1024);
+        File fileToSend = createFileRandomData(filePrefix, 10 * 1024 * 1024);
+
+        snd.context().io().transfererFileIoFactory(new FileIOFactory() {
+            @Override public FileIO create(File file, OpenOption... modes) throws IOException {
+                FileIO fileIo = IO_FACTORY.create(file, modes);
+
+                return new FileIODecorator(fileIo) {
+                    /** {@inheritDoc} */
+                    @Override public long transferTo(long position, long count, WritableByteChannel target)
+                        throws IOException {
+                        // Send 5 chunks and close the channel.
+                        if (cnt.incrementAndGet() == 10)
+                            target.close();
+
+                        return super.transferTo(position, count, target);
+                    }
+                };
+            }
+        });
 
         rcv.context().io().addTransmissionHandler(topic, new TransmissionHandlerAdapter() {
             /** {@inheritDoc} */
             @Override public ChunkHandler chunkHandler(UUID nodeId, String name, long offset, long cnt,
                 Map<String, Serializable> params) throws IgniteCheckedException {
-
-                File file = new File(tempStore, name + "_" + rcv.localNode().id());
-
-                try {
-                    fileIo[0] = new RandomAccessFileIOFactory().create(file);
-                }
-                catch (IOException e) {
-                    throw new IgniteCheckedException(e);
-                }
-
                 return new ChunkHandler() {
+                    @Override public void open(long offset, long cnt) throws IgniteCheckedException {
+                        if (fileIo[0] == null) {
+                            try {
+                                fileIo[0] = IO_FACTORY.create(file);
+
+                                fileIo[0].position(offset);
+                            }
+                            catch (IOException e) {
+                                throw new IgniteCheckedException(e);
+                            }
+                        }
+                    }
+
                     @Override public int size() {
-                        return 1024; // Page size
+                        return chunkSize;
                     }
 
                     @Override public void accept(ByteBuffer buff) throws IgniteCheckedException {
@@ -592,16 +626,17 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
                             assertEquals(buff.limit(), buff.capacity());
 
                             fileIo[0].writeFully(buff);
+                            acceptedChunks.getAndIncrement();
                         }
-                        catch (IOException e) {
+                        catch (Throwable e) {
                             throw new IgniteCheckedException(e);
                         }
                     }
 
                     @Override public void close() throws IOException {
-                        assertEquals(fileToSend.length(), file.length());
-                        assertCrcEquals(fileToSend, file);
                         U.closeQuiet(fileIo[0]);
+
+                        fileIo[0] = null;
                     }
                 };
             }
@@ -610,18 +645,21 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.BUFF);
+            writer.write(fileToSend, ReadPolicy.CHUNK);
         }
-        finally {
-            U.closeQuiet(fileIo[0]);
-        }
+
+        assertEquals("Total number of accepted chunks by remote node is not as expected",
+            fileToSend.length() / chunkSize, acceptedChunks.get());
+        assertEquals("Received file and sent files have not the same lenght", fileToSend.length(), file.length());
+        assertCrcEquals(fileToSend, file);
+        assertNull(fileIo[0]);
     }
 
     /**
      * @throws Exception If fails.
      */
     @Test(expected = IgniteCheckedException.class)
-    public void testChunkHandlerReconnectOnInitFail() throws Exception {
+    public void testChunkHandlerInitSizeFail() throws Exception {
         IgniteEx snd = startGrid(0);
         IgniteEx rcv = startGrid(1);
 
@@ -634,6 +672,10 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             @Override public ChunkHandler chunkHandler(UUID nodeId, String name, long offset, long cnt,
                 Map<String, Serializable> params) {
                 return new ChunkHandler() {
+                    @Override public void open(long offset, long cnt) throws IgniteCheckedException {
+                        // No-op.
+                    }
+
                     @Override public int size() {
                         throw new IgniteException("Test exception. Initialization failed");
                     }
@@ -652,7 +694,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
         try (GridIoManager.FileWriter writer = snd.context()
             .io()
             .openFileWriter(rcv.localNode().id(), topic)) {
-            writer.write(fileToSend, ReadPolicy.BUFF);
+            writer.write(fileToSend, ReadPolicy.CHUNK);
         }
     }
 

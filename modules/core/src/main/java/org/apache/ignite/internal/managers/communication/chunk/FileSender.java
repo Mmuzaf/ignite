@@ -26,6 +26,7 @@ import java.nio.channels.WritableByteChannel;
 import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.internal.managers.communication.ReadPolicy;
 import org.apache.ignite.internal.managers.communication.TransmitMeta;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
@@ -43,6 +44,9 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * for details.
  */
 public class FileSender extends AbstractTransferer {
+    /** Ignite logger. */
+    private final IgniteLogger log;
+
     /** The default factory to provide IO oprations over underlying file. */
     @GridToStringExclude
     private final FileIOFactory fileIoFactory;
@@ -60,6 +64,7 @@ public class FileSender extends AbstractTransferer {
      * @param cnt Number of bytes to transfer.
      * @param params Additional file params.
      * @param stopChecker Node stop or prcoess interrupt checker.
+     * @param log Ignite logger.
      * @param factory Factory to produce IO interface on files.
      * @param chunkSize The size of chunk to read.
      */
@@ -69,18 +74,19 @@ public class FileSender extends AbstractTransferer {
         long cnt,
         Map<String, Serializable> params,
         Supplier<Boolean> stopChecker,
+        IgniteLogger log,
         FileIOFactory factory,
         int chunkSize
     ) {
         super(file.getName(), pos, cnt, params, stopChecker);
 
         assert file != null;
+        assert chunkSize > 0;
 
         this.file = file;
-
-        chunkSize(chunkSize);
-
+        this.chunkSize = chunkSize;
         fileIoFactory = factory;
+        this.log = log.getLogger(FileSender.class);
     }
 
     /**
@@ -115,7 +121,7 @@ public class FileSender extends AbstractTransferer {
         // Send meta about curent file to remote.
         new TransmitMeta(name,
             startPos + transferred,
-            total,
+            total - transferred,
             transferred == 0,
             params,
             plc,
@@ -169,6 +175,8 @@ public class FileSender extends AbstractTransferer {
         }
 
         transferred = uploadedBytes;
+
+        U.log(log, "Update senders number of transferred bytes after reconnect: " + uploadedBytes);
     }
 
     /**

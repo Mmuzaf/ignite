@@ -110,15 +110,6 @@ abstract class AbstractTransferer implements Closeable {
     }
 
     /**
-     * @param chunkSize The size of chunk in bytes.
-     */
-    protected void chunkSize(int chunkSize) {
-        assert chunkSize > 0;
-
-        this.chunkSize = chunkSize;
-    }
-
-    /**
      * @return {@code true} if and only if a chunked object has received all the data it expects.
      */
     protected boolean hasNextChunk() {

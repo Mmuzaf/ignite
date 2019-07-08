@@ -25,5 +25,5 @@ public enum ReadPolicy {
     FILE,
 
     /** Read the source into an appropriate ByteBuffer. */
-    BUFF
+    CHUNK
 }

@@ -34,6 +34,8 @@ import org.apache.ignite.internal.util.tostring.GridToStringExclude;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
 
+import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
+
 /**
  * Class represents a chunk data receiver which is pulling data from channel vi
  * {@link FileChannel#transferFrom(ReadableByteChannel, long, long)}.
@@ -97,33 +99,40 @@ public class FileReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override protected void init(int chunkSize) throws IgniteCheckedException {
-        assert file == null;
+    @Override protected void init(int chunkSize, TransmitMeta meta) throws IgniteCheckedException {
+        assert chunkSize > 0;
+        assert meta != null;
 
-        chunkSize(chunkSize);
+        this.chunkSize = chunkSize;
 
-        String fileAbsPath = hnd.path();
+        if (file == null) {
+            String fileAbsPath = hnd.path();
 
-        if (fileAbsPath == null || fileAbsPath.trim().isEmpty())
-            throw new IgniteCheckedException("File receiver absolute path cannot be empty or null. Receiver cannot be" +
-                " initialized: " + this);
+            if (fileAbsPath == null || fileAbsPath.trim().isEmpty())
+                throw new IgniteCheckedException("File receiver absolute path cannot be empty or null. Receiver cannot be" +
+                    " initialized: " + this);
 
-        file = new File(fileAbsPath);
-    }
+            file = new File(fileAbsPath);
+        }
+        else {
+            assertParameter(!meta.initial(), "Read operation stopped. Attempt to receive a new file from channel, " +
+                "while the previous was not fully loaded [meta=" + meta + ", prevFile=" + name + ']');
+        }
 
-    /** {@inheritDoc} */
-    @Override protected void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
         try {
             if (fileIo == null) {
                 fileIo = fileIoFactory.create(file);
 
-                fileIo.position(startPos);
+                fileIo.position(startPos + transferred);
             }
         }
         catch (IOException e) {
             throw new IgniteCheckedException("Unable to open destination file. Receiver will will be stopped", e);
         }
+    }
 
+    /** {@inheritDoc} */
+    @Override protected void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
         long batchSize = Math.min(chunkSize, total - transferred);
 
         long readed = fileIo.transferFrom(ch, startPos + transferred, batchSize);
