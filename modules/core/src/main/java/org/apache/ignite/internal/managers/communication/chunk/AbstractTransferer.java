@@ -47,18 +47,18 @@ abstract class AbstractTransferer implements Closeable {
     /** The total number of bytes to send or receive. */
     protected final long total;
 
-    /** The number of bytes successfully transferred druring iteration. */
-    protected long transferred;
-
-    /** The size of segment for the read. */
-    protected int chunkSize;
-
     /** The unique input name to identify particular transfer part. */
     protected final String name;
 
     /** Additional stream params. */
     @GridToStringInclude
     protected final Map<String, Serializable> params = new HashMap<>();
+
+    /** The number of bytes successfully transferred druring iteration. */
+    protected long transferred;
+
+    /** The size of segment for the read. */
+    protected int chunkSize;
 
     /**
      * @param name The unique file name within transfer process.
