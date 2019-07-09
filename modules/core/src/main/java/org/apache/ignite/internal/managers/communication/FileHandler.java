@@ -26,7 +26,7 @@ import java.io.File;
  */
 public interface FileHandler {
     /**
-     * @return The absolute pathname string denoting the file or {@code null} if it is no sense.
+     * @return The absolute pathname string denoting the file.
      */
     public String path();
 
