@@ -602,7 +602,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             @Override public ChunkHandler chunkHandler(UUID nodeId, String name, long offset, long cnt,
                 Map<String, Serializable> params) throws IgniteCheckedException {
                 return new ChunkHandler() {
-                    @Override public void open(long startPos, long cnt) throws IgniteCheckedException {
+                    @Override public void open(long startPos) throws IgniteCheckedException {
                         if (fileIo[0] == null) {
                             try {
                                 fileIo[0] = IO_FACTORY.create(file);
@@ -672,7 +672,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             @Override public ChunkHandler chunkHandler(UUID nodeId, String name, long offset, long cnt,
                 Map<String, Serializable> params) {
                 return new ChunkHandler() {
-                    @Override public void open(long startPos, long cnt) throws IgniteCheckedException {
+                    @Override public void open(long startPos) throws IgniteCheckedException {
                         // No-op.
                     }
 

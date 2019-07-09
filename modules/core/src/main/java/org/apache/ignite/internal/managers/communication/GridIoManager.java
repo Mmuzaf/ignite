@@ -2755,7 +2755,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
     /**
      * @param nodeId Remote node id.
-     * @param handler The current handler instance which produces file handlers.
+     * @param hnd Currnet handler instance which produces file handlers.
      * @param meta Meta information about file pending to receive to create appropriate receiver.
      * @param stopChecker Process interrupt checker.
      * @return Chunk data recevier.
@@ -2763,7 +2763,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      */
     private AbstractReceiver createChunkReceiver(
         UUID nodeId,
-        TransmissionHandler handler,
+        TransmissionHandler hnd,
         TransmissionMeta meta,
         Supplier<Boolean> stopChecker
     ) throws IgniteCheckedException {
@@ -2779,7 +2779,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     meta.params(),
                     stopChecker,
                     fileIoFactory,
-                    handler.fileHandler(nodeId,
+                    hnd.fileHandler(nodeId,
                         meta.name(),
                         meta.offset(),
                         meta.count(),
@@ -2792,7 +2792,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     meta.count(),
                     meta.params(),
                     stopChecker,
-                    handler.chunkHandler(nodeId,
+                    hnd.chunkHandler(nodeId,
                         meta.name(),
                         meta.offset(),
                         meta.count(),

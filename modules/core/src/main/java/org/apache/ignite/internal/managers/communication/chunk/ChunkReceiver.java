@@ -83,7 +83,7 @@ public class ChunkReceiver extends AbstractReceiver {
         buf = ByteBuffer.allocate(size);
         buf.order(ByteOrder.nativeOrder());
 
-        hnd.open(meta.offset(), meta.count());
+        hnd.open(meta.offset());
     }
 
     /** {@inheritDoc} */
