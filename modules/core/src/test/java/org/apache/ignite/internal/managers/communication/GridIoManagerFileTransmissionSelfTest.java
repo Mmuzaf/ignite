@@ -601,20 +601,16 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             /** {@inheritDoc} */
             @Override public ChunkHandler chunkHandler(UUID nodeId, String name, long offset, long cnt,
                 Map<String, Serializable> params) throws IgniteCheckedException {
-                return new ChunkHandler() {
-                    @Override public void open(long pos) throws IgniteCheckedException {
-                        if (fileIo[0] == null) {
-                            try {
-                                fileIo[0] = IO_FACTORY.create(file);
-
-                                fileIo[0].position(pos);
-                            }
-                            catch (IOException e) {
-                                throw new IgniteCheckedException(e);
-                            }
-                        }
+                if (fileIo[0] == null) {
+                    try {
+                        fileIo[0] = IO_FACTORY.create(file);
                     }
+                    catch (IOException e) {
+                        throw new IgniteCheckedException(e);
+                    }
+                }
 
+                return new ChunkHandler() {
                     @Override public int size() {
                         return chunkSize;
                     }
@@ -672,10 +668,6 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             @Override public ChunkHandler chunkHandler(UUID nodeId, String name, long offset, long cnt,
                 Map<String, Serializable> params) {
                 return new ChunkHandler() {
-                    @Override public void open(long pos) throws IgniteCheckedException {
-                        // No-op.
-                    }
-
                     @Override public int size() {
                         throw new IgniteException("Test exception. Initialization failed");
                     }

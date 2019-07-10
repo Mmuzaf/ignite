@@ -76,6 +76,17 @@ public class ChunkReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
+    @Override public void receive(
+        ReadableByteChannel ch,
+        TransmissionMeta meta
+    ) throws IOException, IgniteCheckedException {
+        super.receive(ch, meta);
+
+        if (transferred == total)
+            hnd.close();
+    }
+
+    /** {@inheritDoc} */
     @Override protected TransmissionPolicy policy() {
         return TransmissionPolicy.CHUNK;
     }
@@ -86,8 +97,6 @@ public class ChunkReceiver extends AbstractReceiver {
 
         buf = ByteBuffer.allocate(chunkSize);
         buf.order(ByteOrder.nativeOrder());
-
-        hnd.open(meta.offset());
     }
 
     /** {@inheritDoc} */
@@ -132,8 +141,6 @@ public class ChunkReceiver extends AbstractReceiver {
 
     /** {@inheritDoc} */
     @Override public void close() throws IOException {
-        hnd.close();
-
         buf = null;
     }
 

@@ -27,12 +27,6 @@ import org.apache.ignite.IgniteCheckedException;
  */
 public interface ChunkHandler extends Closeable {
     /**
-     * @param pos New offset position in file.
-     * @throws IgniteCheckedException If fails to open.
-     */
-    public void open(long pos) throws IgniteCheckedException;
-
-    /**
      * @return The size of of {@link ByteBuffer} to read the input channel into.
      */
     public int size();
