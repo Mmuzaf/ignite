@@ -60,17 +60,14 @@ public abstract class AbstractReceiver extends AbstractTransmission {
     /**
      * @param ch Input channel to read data from.
      * @param meta Meta information about receiving file.
-     * @param chunkSize Size of chunks for receiver.
      * @throws IOException If an io exception occurred.
      * @throws IgniteCheckedException If some check failed.
      */
     public void receive(
         ReadableByteChannel ch,
-        TransmissionMeta meta,
-        int chunkSize
+        TransmissionMeta meta
     ) throws IOException, IgniteCheckedException {
         assert meta != null;
-        assert chunkSize > 0;
 
         assertParameter(name.equals(meta.name()), "Attempt to load different file " +
             "[name=" + name + ", meta=" + meta + ']');
@@ -83,7 +80,7 @@ public abstract class AbstractReceiver extends AbstractTransmission {
             "the next chunk is incorrect [total=" + total + ", transferred=" + transferred +
             ", startPos=" + startPos + ", meta=" + meta + ']');
 
-        init(chunkSize, meta);
+        init(meta);
 
         // Read data from the input.
         while (hasNextChunk()) {
@@ -118,11 +115,10 @@ public abstract class AbstractReceiver extends AbstractTransmission {
     protected abstract TransmissionPolicy policy();
 
     /**
-     * @param chunkSize Size of chunks.
      * @param meta Meta information about receiving file.
      * @throws IgniteCheckedException If fails.
      */
-    protected abstract void init(int chunkSize, TransmissionMeta meta) throws IgniteCheckedException;
+    protected abstract void init(TransmissionMeta meta) throws IgniteCheckedException;
 
     /**
      * @param ch Channel to read data from.

@@ -23,9 +23,12 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.ReadableByteChannel;
 import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.internal.managers.communication.ChunkHandler;
+import org.apache.ignite.internal.managers.communication.TransmissionHandler;
 import org.apache.ignite.internal.managers.communication.TransmissionMeta;
 import org.apache.ignite.internal.managers.communication.TransmissionPolicy;
 import org.apache.ignite.internal.util.typedef.internal.S;
@@ -42,26 +45,34 @@ public class ChunkReceiver extends AbstractReceiver {
     private ByteBuffer buf;
 
     /**
+     * @param nodeId The remote node id receive request for transmission from.
      * @param name The unique file name within transfer process.
      * @param startPos The position from which the transfer should start to.
      * @param cnt The number of bytes to expect of transfer.
      * @param params Additional stream params.
+     * @param chunkSize Size of chunks.
      * @param stopChecker Node stop or prcoess interrupt checker.
-     * @param hnd The chunk hnd to process each chunk.
+     * @param hnd Transmission handler to process download result.
+     * @throws IgniteCheckedException If fails.
      */
     public ChunkReceiver(
+        UUID nodeId,
         String name,
         long startPos,
         long cnt,
         Map<String, Serializable> params,
+        int chunkSize,
         Supplier<Boolean> stopChecker,
-        ChunkHandler hnd
-    ) {
+        TransmissionHandler hnd
+    ) throws IgniteCheckedException {
         super(name, startPos, cnt, params, stopChecker);
 
-        assert hnd != null;
+        assert chunkSize > 0;
 
-        this.hnd = hnd;
+        this.hnd = Objects.requireNonNull(hnd.chunkHandler(nodeId, name, startPos, cnt, params));
+
+        int buffSize = this.hnd.size();
+        this.chunkSize = buffSize > 0 ? buffSize : chunkSize;;
     }
 
     /** {@inheritDoc} */
@@ -70,17 +81,10 @@ public class ChunkReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override protected void init(int chunkSize, TransmissionMeta meta) throws IgniteCheckedException {
-        assert chunkSize > 0;
+    @Override protected void init(TransmissionMeta meta) throws IgniteCheckedException {
         assert meta != null;
 
-        int buffSize = hnd.size();
-
-        int size = buffSize > 0 ? buffSize : chunkSize;
-
-        this.chunkSize = size;
-
-        buf = ByteBuffer.allocate(size);
+        buf = ByteBuffer.allocate(chunkSize);
         buf.order(ByteOrder.nativeOrder());
 
         hnd.open(meta.offset());

@@ -185,13 +185,13 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     private static final int DFLT_CHUNK_SIZE_BYTES = 256 * 1024;
 
     /** Map of registered handlers per each IO topic. */
-    private final ConcurrentMap<Object, TransmissionHandler> topicTransmitHnds = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Object, TransmissionHandler> topicTransmissionHnds = new ConcurrentHashMap<>();
 
     /** The map of already known channel read contexts by its registered topics. */
     private final ConcurrentMap<Object, ReceiverContext> rcvCtxs = new ConcurrentHashMap<>();
 
     /** The map of sessions which are currently writing files and their corresponding interruption flags. */
-    private final ConcurrentMap<T2<UUID, IgniteUuid>, AtomicBoolean> fileWriterStopFlags = new ConcurrentHashMap<>();
+    private final ConcurrentMap<T2<UUID, IgniteUuid>, AtomicBoolean> senderStopFlags = new ConcurrentHashMap<>();
 
     /**
      * Default factory to provide IO operation interface over files for futher transmission them between nodes.
@@ -821,7 +821,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                         try {
                             // Stop all writer sessions.
-                            for (Map.Entry<T2<UUID, IgniteUuid>, AtomicBoolean> writeSesEntry: fileWriterStopFlags.entrySet()) {
+                            for (Map.Entry<T2<UUID, IgniteUuid>, AtomicBoolean> writeSesEntry: senderStopFlags.entrySet()) {
                                 if (writeSesEntry.getKey().get1().equals(nodeId))
                                     writeSesEntry.getValue().set(true);
                             }
@@ -1006,7 +1006,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
             stopping = true;
 
-            topicTransmitHnds.clear();
+            topicTransmissionHnds.clear();
         }
         finally {
             busyLock.writeLock().unlock();
@@ -1752,8 +1752,8 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * @param topic The remote topic to connect to.
      * @return The channel instance to communicate with remote.
      */
-    public FileWriter openFileWriter(UUID remoteId, Object topic) {
-        return new FileWriter(remoteId, topic);
+    public TransmissionSender openTransmissionSender(UUID remoteId, Object topic) {
+        return new TransmissionSender(remoteId, topic);
     }
 
     /**
@@ -1761,7 +1761,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * @param hnd Handler which will handle file upload requests.
      */
     public void addTransmissionHandler(Object topic, TransmissionHandler hnd) {
-        TransmissionHandler hnd0 = topicTransmitHnds.putIfAbsent(topic, hnd);
+        TransmissionHandler hnd0 = topicTransmissionHnds.putIfAbsent(topic, hnd);
 
         if (hnd0 != null)
             U.warn(log, "The topic already have an appropriate session handler [topic=" + topic + ']');
@@ -1771,12 +1771,13 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * @param topic The topic to erase handler from.
      */
     public void removeTransmissionHandler(Object topic) {
-        topicTransmitHnds.remove(topic);
+        topicTransmissionHnds.remove(topic);
     }
 
     /**
-     * This method must be used prior to opening a {@link FileWriter} by calling {@link #openFileWriter(UUID, Object)}
-     * to ensure that remote and local nodes are fully support direct {@link SocketChannel} connection to transfer data.
+     * This method must be used prior to opening a {@link TransmissionSender} by calling
+     * {@link #openTransmissionSender(UUID, Object)} to ensure that remote and local nodes
+     * are fully support direct {@link SocketChannel} connection to transfer data.
      *
      * @param node Remote node to check.
      * @return {@code true} if file can be send over socket channel directly.
@@ -2570,7 +2571,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         ObjectOutputStream out = null;
 
         try {
-            TransmissionHandler hnd = topicTransmitHnds.get(topic);
+            TransmissionHandler hnd = topicTransmissionHnds.get(topic);
 
             if (hnd == null) {
                 U.warn(log, "There is no handler for given topic. Opened channel will be closed [nodeId=" + nodeId +
@@ -2700,16 +2701,17 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 }
 
                 if (rcvCtx.lastRcv == null) {
-                    rcvCtx.lastRcv = createChunkReceiver(rcvCtx.nodeId,
+                    rcvCtx.lastRcv = createReceiver(rcvCtx.nodeId,
                         rcvCtx.hnd,
                         meta,
+                        chunkSize,
                         () -> stopping || rcvCtx.interrupted);
                 }
 
                 try (AbstractReceiver rcv = rcvCtx.lastRcv) {
                     long startTime = U.currentTimeMillis();
 
-                    rcv.receive(channel, meta, chunkSize);
+                    rcv.receive(channel, meta);
 
                     // Write processing ack.
                     out.writeLong(rcv.transferred());
@@ -2757,14 +2759,16 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * @param nodeId Remote node id.
      * @param hnd Currnet handler instance which produces file handlers.
      * @param meta Meta information about file pending to receive to create appropriate receiver.
+     * @param chunkSize Size of chunks.
      * @param stopChecker Process interrupt checker.
      * @return Chunk data recevier.
      * @throws IgniteCheckedException If fails.
      */
-    private AbstractReceiver createChunkReceiver(
+    private AbstractReceiver createReceiver(
         UUID nodeId,
         TransmissionHandler hnd,
         TransmissionMeta meta,
+        int chunkSize,
         Supplier<Boolean> stopChecker
     ) throws IgniteCheckedException {
         assertParameter(meta.initial(), "Read operation stopped. Attempt to receive a new file from channel, " +
@@ -2773,30 +2777,26 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         switch (meta.policy()) {
             case FILE:
                 return new FileReceiver(
+                    nodeId,
                     meta.name(),
                     meta.offset(),
                     meta.count(),
                     meta.params(),
+                    chunkSize,
                     stopChecker,
                     fileIoFactory,
-                    hnd.fileHandler(nodeId,
-                        meta.name(),
-                        meta.offset(),
-                        meta.count(),
-                        meta.params()));
+                    hnd);
 
             case CHUNK:
                 return new ChunkReceiver(
+                    nodeId,
                     meta.name(),
                     meta.offset(),
                     meta.count(),
                     meta.params(),
+                    chunkSize,
                     stopChecker,
-                    hnd.chunkHandler(nodeId,
-                        meta.name(),
-                        meta.offset(),
-                        meta.count(),
-                        meta.params()));
+                    hnd);
 
             default:
                 throw new IgniteCheckedException("The type of read plc is unknown. The impelentation " +
@@ -2918,7 +2918,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      *     </ul>
      * </p>
      */
-    public class FileWriter implements Closeable {
+    public class TransmissionSender implements Closeable {
         /** Remote node id to connect to. */
         private final UUID remoteId;
 
@@ -2941,7 +2941,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
          * @param remoteId The remote note to connect to.
          * @param topic The remote topic to connect to.
          */
-        public FileWriter(
+        public TransmissionSender(
             UUID remoteId,
             Object topic
         ) {
@@ -2956,7 +2956,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
          * @throws IOException If fails.
          */
         private TransmissionMeta connect() throws IgniteCheckedException, IOException {
-            fileWriterStopFlags.putIfAbsent(sesKey, new AtomicBoolean());
+            senderStopFlags.putIfAbsent(sesKey, new AtomicBoolean());
 
             SocketChannel channel = (SocketChannel)openChannel(remoteId,
                 topic,
@@ -2983,12 +2983,12 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
          * @param plc The policy of handling data on remote.
          * @throws IgniteCheckedException If fails.
          */
-        public void write(
+        public void send(
             File file,
             Map<String, Serializable> params,
             TransmissionPolicy plc
         ) throws IgniteCheckedException {
-            write(file, 0, file.length(), params, plc);
+            send(file, 0, file.length(), params, plc);
         }
 
         /**
@@ -2996,11 +2996,11 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
          * @param plc The policy of handling data on remote.
          * @throws IgniteCheckedException If fails.
          */
-        public void write(
+        public void send(
             File file,
             TransmissionPolicy plc
         ) throws IgniteCheckedException {
-            write(file, 0, file.length(), new HashMap<>(), plc);
+            send(file, 0, file.length(), new HashMap<>(), plc);
         }
 
         /**
@@ -3011,7 +3011,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
          * @param plc The policy of handling data on remote.
          * @throws IgniteCheckedException If fails.
          */
-        public void write(
+        public void send(
             File file,
             long offset,
             long cnt,
@@ -3022,7 +3022,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 offset,
                 cnt,
                 params,
-                () -> stopping || fileWriterStopFlags.get(sesKey).get(),
+                () -> stopping || senderStopFlags.get(sesKey).get(),
                 log,
                 fileIoFactory,
                 chunkSize)
@@ -3100,7 +3100,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         /** {@inheritDoc} */
         @Override public void close() throws IOException {
             try {
-                fileWriterStopFlags.remove(sesKey);
+                senderStopFlags.remove(sesKey);
 
                 if (out != null) {
                     U.log(log, "Close file writer session: " + sesKey);

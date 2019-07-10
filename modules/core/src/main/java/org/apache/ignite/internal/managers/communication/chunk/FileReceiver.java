@@ -23,9 +23,12 @@ import java.io.Serializable;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
 import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.internal.managers.communication.FileHandler;
+import org.apache.ignite.internal.managers.communication.TransmissionHandler;
 import org.apache.ignite.internal.managers.communication.TransmissionMeta;
 import org.apache.ignite.internal.managers.communication.TransmissionPolicy;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
@@ -56,38 +59,43 @@ public class FileReceiver extends AbstractReceiver {
     private FileIO fileIo;
 
     /**
+     * @param nodeId The remote node id receive request for transmission from.
      * @param name The unique file name within transfer process.
      * @param startPos The position from which the transfer should start to.
      * @param cnt The number of bytes to expect of transfer.
      * @param params Additional stream params.
+     * @param chunkSize Size of chunks.
      * @param stopChecker Node stop or prcoess interrupt checker.
      * @param factory Factory to produce IO interface on files.
-     * @param hnd The file hnd to process download result.
+     * @param hnd Transmission handler to process download result.
+     * @throws IgniteCheckedException If fails.
      */
     public FileReceiver(
+        UUID nodeId,
         String name,
         long startPos,
         long cnt,
         Map<String, Serializable> params,
+        int chunkSize,
         Supplier<Boolean> stopChecker,
         FileIOFactory factory,
-        FileHandler hnd
-    ) {
+        TransmissionHandler hnd
+    ) throws IgniteCheckedException {
         super(name, startPos, cnt, params, stopChecker);
 
-        assert hnd != null;
+        assert chunkSize > 0;
 
+        this.chunkSize = chunkSize;
         fileIoFactory = factory;
-        this.hnd = hnd;
+        this.hnd = Objects.requireNonNull(hnd.fileHandler(nodeId, name, startPos, cnt, params));
     }
 
     /** {@inheritDoc} */
     @Override public void receive(
         ReadableByteChannel ch,
-        TransmissionMeta meta,
-        int chunkSize
+        TransmissionMeta meta
     ) throws IOException, IgniteCheckedException {
-        super.receive(ch, meta, chunkSize);
+        super.receive(ch, meta);
 
         if (transferred == total)
             hnd.accept(file);
@@ -99,11 +107,8 @@ public class FileReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override protected void init(int chunkSize, TransmissionMeta meta) throws IgniteCheckedException {
-        assert chunkSize > 0;
+    @Override protected void init(TransmissionMeta meta) throws IgniteCheckedException {
         assert meta != null;
-
-        this.chunkSize = chunkSize;
 
         if (file == null) {
             String fileAbsPath = hnd.path();
