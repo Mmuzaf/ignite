@@ -69,7 +69,8 @@ public class ChunkReceiver extends AbstractReceiver {
 
         assert chunkSize > 0;
 
-        this.hnd = Objects.requireNonNull(hnd.chunkHandler(nodeId, name, startPos, cnt, params));
+        this.hnd = Objects.requireNonNull(hnd.chunkHandler(nodeId, name, startPos, cnt, params),
+            "Chunk handler is not provided by transmission handler");
 
         int buffSize = this.hnd.size();
         this.chunkSize = buffSize > 0 ? buffSize : chunkSize;;

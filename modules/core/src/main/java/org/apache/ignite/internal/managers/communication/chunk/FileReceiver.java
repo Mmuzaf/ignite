@@ -87,7 +87,8 @@ public class FileReceiver extends AbstractReceiver {
 
         this.chunkSize = chunkSize;
         fileIoFactory = factory;
-        this.hnd = Objects.requireNonNull(hnd.fileHandler(nodeId, name, startPos, cnt, params));
+        this.hnd = Objects.requireNonNull(hnd.fileHandler(nodeId, name, startPos, cnt, params),
+            "File handler is not provided by transmission handler");
     }
 
     /** {@inheritDoc} */
