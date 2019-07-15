@@ -68,6 +68,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
+import org.apache.ignite.IgniteMessaging;
+import org.apache.ignite.cluster.ClusterGroup;
 import org.apache.ignite.cluster.ClusterNode;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.events.DiscoveryEvent;
@@ -77,6 +79,7 @@ import org.apache.ignite.internal.GridTopic;
 import org.apache.ignite.internal.IgniteClientDisconnectedCheckedException;
 import org.apache.ignite.internal.IgniteComponentType;
 import org.apache.ignite.internal.IgniteDeploymentCheckedException;
+import org.apache.ignite.internal.IgniteFeatures;
 import org.apache.ignite.internal.IgniteInternalFuture;
 import org.apache.ignite.internal.NodeStoppingException;
 import org.apache.ignite.internal.cluster.ClusterTopologyCheckedException;
@@ -156,7 +159,66 @@ import static org.apache.ignite.internal.util.nio.GridNioBackPressureControl.thr
 import static org.jsr166.ConcurrentLinkedHashMap.QueuePolicy.PER_SEGMENT_Q_OPTIMIZED_RMV;
 
 /**
- * Grid communication manager.
+ * This class represents the internal grid communication (<em>input</em> and <em>output</em>) manager
+ * which is placed as a layer of indirection interaction between the Ignies Kernal and Communicaiton SPI.
+ * Communication manager resopnsible for controlling Communication SPI which in turn is responsible
+ * for exchanging data between Ignites nodes.
+ *
+ * <h2>Data exchanging</h2>
+ * <p>
+ * Communication manager provides a rich API for data exchanging between a pair of cluster nodes. Two types
+ * of communication <em>Message-based communication</em> and <em>File-based communication</em> are available.
+ * Each of them support sending data to an arbitrary topic on the remote node (topics of {@link GridTopic} is used).
+ *
+ * <h3>Message-based communication</h3>
+ * <p>
+ * Ignites extension {@link Message} and {@link GridTopic} are used to provide a topic-based messaging protocol
+ * between cluster nodes. All of messages used for data exchanging can be devided into two general types:
+ * <em>internal</em> and <em>user</em> messages.
+ * <p>
+ * <em>Internal message</em> communication is used by Ignites Kernal. Please, refer to appropriate methods.
+ * <ul>
+ * <li>{@link #sendToGridTopic(ClusterNode, GridTopic, Message, byte)}</li>
+ * <li>{@link #sendOrderedMessage(ClusterNode, Object, Message, byte, long, boolean)}</li>
+ * <li>{@link #addMessageListener(Object, GridMessageListener)}</li>
+ * </ul>
+ * <p>
+ * <em>User message</em> communication is directly exposed to the {@link IgniteMessaging} API and provides
+ * for user functionality for topic-based message exchanging among nodes within the cluser defined
+ * by {@link ClusterGroup}. Please, refer to appropriate methods.
+ * <ul>
+ * <li>{@link #sendToCustomTopic(ClusterNode, Object, Message, byte)}</li>
+ * <li>{@link #addUserMessageListener(Object, IgniteBiPredicate, UUID)}</li>
+ * </ul>
+ *
+ * <h3>File-based communication</h3>
+ * <p>
+ * Sending or receiving binary data (represented by a <em>File</em>) over a <em>SocketChannel</em> is only
+ * possible when the build-in <em>TcpCommunicationSpi</em> implementation of Communication SPI is used and
+ * both local and remote nodes are {@link IgniteFeatures#CHANNEL_COMMUNICATION CHANNEL_COMMUNICATION} feature
+ * support. To ensue that the remote node satisfies all conditions the {@link #fileTransmissionSupported(ClusterNode)}
+ * method must be called prior to data sending.
+ * <p>
+ * It is possible to receive a set of files on a particular topic (any of {@link GridTopic}) on the remote node.
+ * A transmission handler for desired topic must be registered prior to opening transmission sender to it.
+ * Use methods below are used to register handlers and open new transmissions:
+ * <ul>
+ * <li>{@link #addTransmissionHandler(Object, TransmissionHandler)}</li>
+ * <li>{@link #openTransmissionSender(UUID, Object)}</li>
+ * </ul>
+ * <p>
+ * Each transmission sender opens a new transmission session to remote node prior to sending files over it.
+ * (see description of {@link TransmissionSender TransmissionSender} for details). The TransmissionSender
+ * will send all files within single session syncronously one by one.
+ * <p>
+ * <em>NOTE.</em> It is important to call <em>close()</em> method or use <em>try-with-resource</em>
+ * statement to release all resources once you've done with the transmission session. This ensures that all
+ * resources are released on remote node in a proper way (i.e. transmission handlers are closed).
+ * <p>
+ *
+ * @see TcpCommunicationSpi
+ * @see IgniteMessaging
+ * @see TransmissionHandler
  */
 public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializable>> {
     /** Empty array of message factories. */
@@ -175,10 +237,11 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     private static final ThreadLocal<Byte> CUR_PLC = new ThreadLocal<>();
 
     /**
-     * The default transfer chunk size in bytes. Setting the transfer chunk size
-     * more than <tt>1 MB</tt> is meaningless because there is no asymptotic benefit.
-     * What we're trying to achieve with larger transfer chunk sizes is fewer context
-     * switches, and every time we double the transfer size you have the context switch cost.
+     * Default transfer chunk size in bytes used for sending\receiving files over a SocketChannel.
+     * Setting the transfer chunk size more than <tt>1 MB</tt> is meaningless because there is
+     * no asymptotic benefit. What you're trying to achieve with larger transfer chunk sizes is
+     * fewer thread context switches, and every time we double the transfer size you have
+     * the context switch cost.
      * <p>
      * Default value is {@code 256Kb}.
      */
@@ -2883,40 +2946,66 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     }
 
     /**
-     * The class represents a session file writer to write a batch of files to the remote node. The writer
-     * must be closed explicitly when all the set of desired files have been written to remote.
+     * Сlass represents an implementation of transmission file writer. Each new instance of transmission sender
+     * will establish a new connection with unique transmission session identifier to the remote node and given
+     * topic (an arbitraty {@link GridTopic} can be used).
      *
-     * Implementation of file writer to transfer files with the zero-copy algorithm (used the {@link FileReceiver}
-     * under the hood). All transport level exceptions of file writer (which are not related to some not the channel
-     * handler one exceptions) are considered as an {@link IOException} and will require reconnect.
-     * For instance, case when the remote peer has closed the connection correctly, so read or write operation over
-     * given socket channel will throw an {@link IOException} or returns <tt>-1</tt>. See some details below.
-     *
+     * <h2>Zero-copy approach</h2>
      * <p>
-     *     <h3>Channel exception handling</h3>
-     *
-     *     If the peer has closed the connection in an orderly way, the read operation:
-     *     <ul>
-     *         <li>read() returns -1</li>
-     *         <li>readLine() returns null</li>
-     *         <li>readXXX() throws EOFException for any other XXX</li>
-     *     </ul>
-     *     A write will throw an <tt>IOException</tt> 'Connection reset by peer', eventually, subject to buffering delays.
-     * </p>
+     * Current implementation of transmission sender is based on file zero-copy algorithm (the {@link FileSender}
+     * is used under the hood). It is potentially much more efficient than a simple loop that reads data from
+     * given file and writes it to the target socket channel. Many operating systems can transfer bytes directly
+     * from the filesystem cache to the target channel without actually copying them to the application memory
+     * level. But if operating system does not support zero-copy file transfer, sending a file with
+     * {@link TransmissionSender} might fail or yield worse performance.
      * <p>
-     *     <h3>Channel timeout handling</h3>
+     * Please, refer to <a href="http://en.wikipedia.org/wiki/Zero-copy">http://en.wikipedia.org/wiki/Zero-copy</a>
+     * or {@link FileChannel#transferTo(long, long, WritableByteChannel)} for details of such approach.
      *
-     *     <ul>
-     *         <li>For read operations over the {@link InputStream} or write operation through the {@link OutputStream}
-     *         the {@link Socket#setSoTimeout(int)} will be used and an {@link SocketTimeoutException} will be
-     *         thrown when the timeout occured.</li>
-     *         <li>To achive the file zero-copy {@link FileChannel#transferTo(long, long, java.nio.channels.WritableByteChannel)}
-     *         the {@link SocketChannel} must be used directly in the blocking mode. For reading or writing over
-     *         the SocketChannels, using the <tt>Socket#setSoTimeout(int)</tt> is not possible, because it isn't
-     *         supported for sockets originating as channels. In this case, the decicated wather thread must be
-     *         used which will close conneciton on timeout occured.</li>
-     *     </ul>
-     * </p>
+     * <h2>Exception handling</h2>
+     * <p>
+     * All transport level exceptions (exception which are not related to remote handler exception or some
+     * file IO exceptions) of transmission file sender will require transmission to be reconnected. For instance,
+     * when the local node closes the socket connection in orderly way, but the file is not fully handled by
+     * remote node, the read operation over the same socket endpoint will return <tt>-1</tt>. Such result will
+     * be consideread as an <em>IOException</em> by handler and it will wait for reestablishing connection to
+     * continue file loading.
+     *
+     * <h3>Read or write from\to socket</h3>
+     * <p>
+     * It is possible that transmission sender receive a <em>Connection reset by peer</em> exception message.
+     * This means that the remote node you are connected to has reset the connection. This is usually caused by a
+     * high amount of traffic on the host, but may be caused by a server error as well or the remote node has exhausted
+     * system resources. Such <em>IOException</em> will be considered as <em>reconnect required</em>.
+     * <p>
+     * Please, see the list of possible exceptions with read operation through established channel (assume that node
+     * has closed the connection in an orderly way) which also will be considered as <em>reconnect required</em>.
+     * <ul>
+     * <li>if <em>read()</em> returns -1</li>
+     * <li>if <em>readLine()</em> returns null</li>
+     * <li>if <em>readXXX()</em> throws <em>EOFException</em> for any other XXX</li>
+     * </ul>
+     *
+     * <h3>Timeout handling</h3>
+     * <p>
+     * <ul>
+     * <li>For read operations over the {@link InputStream} or write operation through the {@link OutputStream}
+     * the {@link Socket#setSoTimeout(int)} will be used and an {@link SocketTimeoutException} will be
+     * thrown when the timeout occured. The default value is taken from {@link IgniteConfiguration#getNetworkTimeout()}.
+     * </li>
+     * <li>Since implementation of zero-copy {@link FileChannel#transferTo(long, long, WritableByteChannel)}
+     * require the {@link SocketChannel} to be used directly in the blocking mode, it is not possible using
+     * the <tt>#setSoTimeout()</tt> for reading or writing over the SocketChannel (it isn't supported for sockets
+     * originating as channels). In this case, the decicated thread is used and will close conneciton on timeout
+     * occured.</li>
+     * </ul>
+     *
+     * <h2>Release resources</h2>
+     * <p>
+     * It is important to call <em>close()</em> method or use <em>try-with-resource</em> statement to release
+     * all resources once you've done with sending files.
+     *
+     * @see FileChannel#transferTo(long, long, WritableByteChannel)
      */
     public class TransmissionSender implements Closeable {
         /** Remote node id to connect to. */
