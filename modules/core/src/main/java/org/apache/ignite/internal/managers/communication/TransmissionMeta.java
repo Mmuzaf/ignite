@@ -31,8 +31,8 @@ import org.apache.ignite.internal.util.typedef.internal.S;
 import static java.util.Optional.ofNullable;
 
 /**
- * Class represents a file meta information to send to a remote node. Used to initiate a new file transfer
- * process or to continue the previous unfinished from the last transmission point.
+ * Class represents a file meta information to send to the remote node. Used to initiate a new file transfer
+ * process or to continue the previous unfinished from the last transmitted point.
  */
 public class TransmissionMeta implements Externalizable {
     /** Default close session instance. The transmit session will be closed if such object received. */

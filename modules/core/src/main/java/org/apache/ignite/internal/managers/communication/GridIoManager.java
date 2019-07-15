@@ -2954,17 +2954,15 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * <p>
      * Current implementation of transmission sender is based on file zero-copy algorithm (the {@link FileSender}
      * is used under the hood). It is potentially much more efficient than a simple loop that reads data from
-     * given file and writes it to the target socket channel. Many operating systems can transfer bytes directly
-     * from the filesystem cache to the target channel without actually copying them to the application memory
-     * level. But if operating system does not support zero-copy file transfer, sending a file with
-     * {@link TransmissionSender} might fail or yield worse performance.
+     * given file and writes it to the target socket channel. But if operating system does not support zero-copy
+     * file transfer, sending a file with {@link TransmissionSender} might fail or yield worse performance.
      * <p>
      * Please, refer to <a href="http://en.wikipedia.org/wiki/Zero-copy">http://en.wikipedia.org/wiki/Zero-copy</a>
      * or {@link FileChannel#transferTo(long, long, WritableByteChannel)} for details of such approach.
      *
      * <h2>File and Chunk handlers</h2>
      * <p>
-     * It is possible to handle sended file (or files) by different handlers on remote node within opened transmission
+     * It is possible to choose a file handler prior to sendig the file to remote node  within opened transmission
      * session. There are two types of handlers available: {@link ChunkHandler} and {@link FileHandler}. You can use an
      * appropriate {@link TransmissionPolicy} for {@link #send(File, long, long, Map, TransmissionPolicy)} method
      * to switch between them.
