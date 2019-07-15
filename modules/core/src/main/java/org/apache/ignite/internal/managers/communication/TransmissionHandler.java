@@ -24,7 +24,17 @@ import java.util.UUID;
 import org.apache.ignite.IgniteCheckedException;
 
 /**
- * The {@code TransmissionHandler} represents a single session of handling input file transmission requests.
+ * Class represents a handler for the set of files considered to be transferred from the remote node. This handler
+ * must be registered to and appropriate topic in {@link GridIoManager} prior to opening a new transmission connection
+ * to this topic. <em>NOTE:</em> there is only one such handler per registered topic is allowed for the communication
+ * manager. Only one thread is allowed for data processing within a single topic.
+ * <p>
+ * Files from the remote node can be handled of two different ways within a signle established connection.
+ * If {@link TransmissionPolicy#FILE} is received togeher with a file transmission meta the <em>FileHandler</em> will
+ * be picked up to handle this request. For the {@link TransmissionPolicy#CHUNK} the <em>ChunkHandler</em> will be used.
+ *
+ * @see FileHandler
+ * @see ChunkHandler
  */
 public interface TransmissionHandler {
     /**

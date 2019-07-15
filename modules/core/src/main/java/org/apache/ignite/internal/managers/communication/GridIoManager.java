@@ -2989,7 +2989,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * to continue file loading.
      * <p>
      * Another example, the transmission sender gets the <em>Connection reset by peer</em> IOException message.
-     * This means that the remote node you are connected to has reset the connection. This is usually caused by a
+     * This means that the remote node you are connected to has to reset the connection. This is usually caused by a
      * high amount of traffic on the host, but may be caused by a server error or the remote node has exhausted
      * system resources as well. Such <em>IOException</em> will be considered as <em>reconnect required</em>.
      *
