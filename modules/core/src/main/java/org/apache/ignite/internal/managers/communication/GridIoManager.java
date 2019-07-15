@@ -2962,43 +2962,44 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * Please, refer to <a href="http://en.wikipedia.org/wiki/Zero-copy">http://en.wikipedia.org/wiki/Zero-copy</a>
      * or {@link FileChannel#transferTo(long, long, WritableByteChannel)} for details of such approach.
      *
+     * <h2>File and Chunk handlers</h2>
+     * <p>
+     * It is possible to handle sended file (or files) by different handlers on remote node within opened transmission
+     * session. There are two types of handlers available: {@link ChunkHandler} and {@link FileHandler}. You can use an
+     * appropriate {@link TransmissionPolicy} for {@link #send(File, long, long, Map, TransmissionPolicy)} method
+     * to switch between them.
+     *
      * <h2>Exception handling</h2>
      * <p>
-     * All transport level exceptions (exception which are not related to remote handler exception or some
-     * file IO exceptions) of transmission file sender will require transmission to be reconnected. For instance,
-     * when the local node closes the socket connection in orderly way, but the file is not fully handled by
-     * remote node, the read operation over the same socket endpoint will return <tt>-1</tt>. Such result will
-     * be consideread as an <em>IOException</em> by handler and it will wait for reestablishing connection to
-     * continue file loading.
-     *
-     * <h3>Read or write from\to socket</h3>
-     * <p>
-     * It is possible that transmission sender receive a <em>Connection reset by peer</em> exception message.
-     * This means that the remote node you are connected to has reset the connection. This is usually caused by a
-     * high amount of traffic on the host, but may be caused by a server error as well or the remote node has exhausted
-     * system resources. Such <em>IOException</em> will be considered as <em>reconnect required</em>.
-     * <p>
-     * Please, see the list of possible exceptions with read operation through established channel (assume that node
-     * has closed the connection in an orderly way) which also will be considered as <em>reconnect required</em>.
+     * The transmission can have two different levels of exception which are handled differently:
      * <ul>
-     * <li>if <em>read()</em> returns -1</li>
-     * <li>if <em>readLine()</em> returns null</li>
-     * <li>if <em>readXXX()</em> throws <em>EOFException</em> for any other XXX</li>
+     * <li><em>transport</em> exception(e.g. some network issues)</li>
+     * <li><em>application</em>\<em>handler</em> level exception</li>
      * </ul>
+     *
+     * <h3><em>Application</em> exceptions</h3>
+     * <p>
+     * The transmission will be stopped immediately and wrapping <em>IgniteCheckedExcpetion</em> thrown in case of
+     * any <em>application</em> exception occured.
+     *
+     * <h3><em>Transport</em> exceptions</h3>
+     * <p>
+     * All transport level exceptions of transmission file sender will require transmission to be reconnected.
+     * For instance, when the local node closes the socket connection in orderly way, but the file is not fully
+     * handled by remote node, the read operation over the same socket endpoint will return <tt>-1</tt>. Such
+     * result will be consideread as an <em>IOException</em> by handler and it will wait for reestablishing connection
+     * to continue file loading.
+     * <p>
+     * Another example, the transmission sender gets the <em>Connection reset by peer</em> IOException message.
+     * This means that the remote node you are connected to has reset the connection. This is usually caused by a
+     * high amount of traffic on the host, but may be caused by a server error or the remote node has exhausted
+     * system resources as well. Such <em>IOException</em> will be considered as <em>reconnect required</em>.
      *
      * <h3>Timeout handling</h3>
      * <p>
-     * <ul>
-     * <li>For read operations over the {@link InputStream} or write operation through the {@link OutputStream}
+     * For read operations over the {@link InputStream} or write operation through the {@link OutputStream}
      * the {@link Socket#setSoTimeout(int)} will be used and an {@link SocketTimeoutException} will be
      * thrown when the timeout occured. The default value is taken from {@link IgniteConfiguration#getNetworkTimeout()}.
-     * </li>
-     * <li>Since implementation of zero-copy {@link FileChannel#transferTo(long, long, WritableByteChannel)}
-     * require the {@link SocketChannel} to be used directly in the blocking mode, it is not possible using
-     * the <tt>#setSoTimeout()</tt> for reading or writing over the SocketChannel (it isn't supported for sockets
-     * originating as channels). In this case, the decicated thread is used and will close conneciton on timeout
-     * occured.</li>
-     * </ul>
      *
      * <h2>Release resources</h2>
      * <p>
