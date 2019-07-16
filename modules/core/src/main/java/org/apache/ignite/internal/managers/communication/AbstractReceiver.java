@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.ignite.internal.managers.communication.chunk;
+package org.apache.ignite.internal.managers.communication;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -23,8 +23,6 @@ import java.nio.channels.ReadableByteChannel;
 import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
-import org.apache.ignite.internal.managers.communication.TransmissionMeta;
-import org.apache.ignite.internal.managers.communication.TransmissionPolicy;
 
 import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
 
@@ -32,7 +30,7 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * Class represents a receiver of data which can be pulled from a channel by chunks of
  * predefined size. Closes when a transmission of represented object ends.
  */
-public abstract class AbstractReceiver extends AbstractTransmission {
+abstract class AbstractReceiver extends AbstractTransmission {
     /**
      * @param name The unique file name within transfer process.
      * @param startPos The position from which the transfer should start to.

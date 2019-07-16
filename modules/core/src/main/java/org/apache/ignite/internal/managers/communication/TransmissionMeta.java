@@ -34,7 +34,7 @@ import static java.util.Optional.ofNullable;
  * Class represents a file meta information to send to the remote node. Used to initiate a new file transfer
  * process or to continue the previous unfinished from the last transmitted point.
  */
-public class TransmissionMeta implements Externalizable {
+class TransmissionMeta implements Externalizable {
     /** Default close session instance. The transmit session will be closed if such object received. */
     public static final TransmissionMeta CLOSED = new TransmissionMeta("", -1, -1, true, null, null, null, true);
 

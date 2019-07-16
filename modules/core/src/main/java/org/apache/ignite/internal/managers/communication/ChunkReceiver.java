@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.ignite.internal.managers.communication.chunk;
+package org.apache.ignite.internal.managers.communication;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -27,17 +27,13 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
-import org.apache.ignite.internal.managers.communication.ChunkHandler;
-import org.apache.ignite.internal.managers.communication.TransmissionHandler;
-import org.apache.ignite.internal.managers.communication.TransmissionMeta;
-import org.apache.ignite.internal.managers.communication.TransmissionPolicy;
 import org.apache.ignite.internal.util.typedef.internal.S;
 
 /**
  * Buffered chunked receiver can handle input socket channel by chunks of data and
  * deliver it to an allocated {@link ByteBuffer}.
  */
-public class ChunkReceiver extends AbstractReceiver {
+class ChunkReceiver extends AbstractReceiver {
     /** Chunked channel handler to process data with chunks. */
     private final ChunkHandler hnd;
 

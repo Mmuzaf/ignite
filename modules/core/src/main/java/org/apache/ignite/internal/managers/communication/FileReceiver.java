@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.ignite.internal.managers.communication.chunk;
+package org.apache.ignite.internal.managers.communication;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,10 +27,6 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
-import org.apache.ignite.internal.managers.communication.FileHandler;
-import org.apache.ignite.internal.managers.communication.TransmissionHandler;
-import org.apache.ignite.internal.managers.communication.TransmissionMeta;
-import org.apache.ignite.internal.managers.communication.TransmissionPolicy;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
@@ -43,7 +39,7 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * Class represents a chunk data receiver which is pulling data from channel vi
  * {@link FileChannel#transferFrom(ReadableByteChannel, long, long)}.
  */
-public class FileReceiver extends AbstractReceiver {
+class FileReceiver extends AbstractReceiver {
     /** The default factory to provide IO oprations over underlying file. */
     @GridToStringExclude
     private final FileIOFactory fileIoFactory;

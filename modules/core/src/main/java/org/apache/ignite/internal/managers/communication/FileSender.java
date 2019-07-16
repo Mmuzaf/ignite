@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.ignite.internal.managers.communication.chunk;
+package org.apache.ignite.internal.managers.communication;
 
 import java.io.File;
 import java.io.IOException;
@@ -27,8 +27,6 @@ import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteLogger;
-import org.apache.ignite.internal.managers.communication.TransmissionMeta;
-import org.apache.ignite.internal.managers.communication.TransmissionPolicy;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
@@ -48,7 +46,7 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  *
  * @see FileChannel#transferTo(long, long, WritableByteChannel)
  */
-public class FileSender extends AbstractTransmission {
+class FileSender extends AbstractTransmission {
     /** Ignite logger. */
     private final IgniteLogger log;
 

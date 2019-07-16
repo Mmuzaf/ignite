@@ -30,7 +30,7 @@ import org.apache.ignite.plugin.extensions.communication.MessageWriter;
  * A message with additional {@link Channel} attibutes which is send on connection established and
  * an appropriate channel is opened.
  */
-public class SessionChannelMessage implements Message {
+class SessionChannelMessage implements Message {
     /** Initial channel message type (value is {@code 177}). */
     public static final short TYPE_CODE = 177;
 

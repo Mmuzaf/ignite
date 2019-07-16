@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.ignite.internal.managers.communication.chunk;
+package org.apache.ignite.internal.managers.communication;
 
 import java.io.Closeable;
 import java.io.File;
