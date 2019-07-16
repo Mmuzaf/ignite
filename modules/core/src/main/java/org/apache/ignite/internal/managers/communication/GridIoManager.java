@@ -176,7 +176,7 @@ import static org.jsr166.ConcurrentLinkedHashMap.QueuePolicy.PER_SEGMENT_Q_OPTIM
  * between cluster nodes. All of messages used for data exchanging can be devided into two general types:
  * <em>internal</em> and <em>user</em> messages.
  * <p>
- * <em>Internal message</em> communication is used by Ignites Kernal. Please, refer to appropriate methods.
+ * <em>Internal message</em> communication is used by Ignites Kernal. Please, refer to appropriate methods below:
  * <ul>
  * <li>{@link #sendToGridTopic(ClusterNode, GridTopic, Message, byte)}</li>
  * <li>{@link #sendOrderedMessage(ClusterNode, Object, Message, byte, long, boolean)}</li>
@@ -185,7 +185,7 @@ import static org.jsr166.ConcurrentLinkedHashMap.QueuePolicy.PER_SEGMENT_Q_OPTIM
  * <p>
  * <em>User message</em> communication is directly exposed to the {@link IgniteMessaging} API and provides
  * for user functionality for topic-based message exchanging among nodes within the cluser defined
- * by {@link ClusterGroup}. Please, refer to appropriate methods.
+ * by {@link ClusterGroup}. Please, refer to appropriate methods below:
  * <ul>
  * <li>{@link #sendToCustomTopic(ClusterNode, Object, Message, byte)}</li>
  * <li>{@link #addUserMessageListener(Object, IgniteBiPredicate, UUID)}</li>
@@ -2967,7 +2967,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * appropriate {@link TransmissionPolicy} for {@link #send(File, long, long, Map, TransmissionPolicy)} method
      * to switch between them.
      *
-     * <h2>Exception handling</h2>
+     * <h2>Exceptions handling</h2>
      * <p>
      * The transmission can have two different levels of exception which are handled differently:
      * <ul>
@@ -2993,7 +2993,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * high amount of traffic on the host, but may be caused by a server error or the remote node has exhausted
      * system resources as well. Such <em>IOException</em> will be considered as <em>reconnect required</em>.
      *
-     * <h3>Timeout handling</h3>
+     * <h3>Timeout exceptions</h3>
      * <p>
      * For read operations over the {@link InputStream} or write operation through the {@link OutputStream}
      * the {@link Socket#setSoTimeout(int)} will be used and an {@link SocketTimeoutException} will be
