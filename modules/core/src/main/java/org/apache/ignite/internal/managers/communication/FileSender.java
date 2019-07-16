@@ -37,7 +37,7 @@ import org.jetbrains.annotations.Nullable;
 import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
 
 /**
- * Class represents a data sender data by chunks of predefined size. All of the chunks will be written to the
+ * Class represents a data sender by chunks of predefined size. All of the chunks will be written to the
  * given socket channel. It is important that for each file you are going to send a new <em>FileSender</em>
  * instance will be created. The sender must keep its internal state of how much data already being
  * transferred to send its state to remote node when reconnection required.
