@@ -34,7 +34,7 @@ import org.apache.ignite.IgniteCheckedException;
  * <h3>TransmissionPolicy</h3>
  * <p>
  * Files from the remote node can be handled of two different ways within a single established connection.
- * It is up to the sender to decide how the particular file must be handled on the remote node. The
+ * It is up to the sender to decide how the particular file must be prccessed by the remote node. The
  * <em>TransmissionPolicy</em> is used for such purpose. If {@link TransmissionPolicy#FILE} type is received by
  * remote node the <em>FileHandler</em> will be picked up to process this file, the otherwise for the
  * {@link TransmissionPolicy#CHUNK} the <em>ChunkHandler</em> will be picked up.
