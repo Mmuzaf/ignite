@@ -44,7 +44,7 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * instance will be created since the sender must keep its internal state of how much data already being
  * transferred to the remote node.
  * <p>
- * The Sender uses the zero-copy streaming algorithm,  see <em>FileChannel#transferTo</em> for details.
+ * The <em>FileSender</em> uses the zero-copy streaming algorithm, see <em>FileChannel#transferTo</em> for details.
  *
  * @see FileChannel#transferTo(long, long, WritableByteChannel)
  */
