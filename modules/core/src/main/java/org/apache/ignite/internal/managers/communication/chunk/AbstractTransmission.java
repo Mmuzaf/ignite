@@ -103,7 +103,7 @@ abstract class AbstractTransmission implements Closeable {
     }
 
     /**
-     * @return {@code true} if the process of data sending\receiving must be interrupt.
+     * @return {@code true} if the transmission process should be interrupted.
      */
     protected boolean stopped() {
         return stopChecker.get();
