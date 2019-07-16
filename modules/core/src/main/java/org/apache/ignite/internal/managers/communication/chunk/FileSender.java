@@ -39,34 +39,39 @@ import org.jetbrains.annotations.Nullable;
 import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
 
 /**
- * Class represents a sender of chunked data which can be pushed to channel.
- * Supports the zero-copy streaming algorithm,  see {@link FileChannel#transferTo(long, long, WritableByteChannel)}
- * for details.
+ * Class represents a data sender data by chunks of predefined size. All of the chunks will be written to the
+ * given socket channel. It is important that for each file you are going to send a new <em>FileSender</em>
+ * instance will be created since the Sender will keep its internal state of how much data already being
+ * transferred to the remote node.
+ * <p>
+ * The Sender uses the zero-copy streaming algorithm,  see <em>FileChannel#transferTo</em> for details.
+ *
+ * @see FileChannel#transferTo(long, long, WritableByteChannel)
  */
 public class FileSender extends AbstractTransmission {
     /** Ignite logger. */
     private final IgniteLogger log;
 
-    /** The default factory to provide IO oprations over underlying file. */
+    /** Default factory to provide IO oprations over given file. */
     @GridToStringExclude
     private final FileIOFactory fileIoFactory;
 
-    /** The abstract java representation of the chunked file. */
+    /** File which will be send to remote by chunks. */
     private final File file;
 
-    /** The corresponding file channel to work with. */
+    /** Corresponding file channel to work with given file. */
     @GridToStringExclude
     private FileIO fileIo;
 
     /**
-     * @param file File representation of current object.
+     * @param file File which is going to be send by chunks.
      * @param pos File offset.
      * @param cnt Number of bytes to transfer.
      * @param params Additional file params.
      * @param stopChecker Node stop or prcoess interrupt checker.
      * @param log Ignite logger.
-     * @param factory Factory to produce IO interface on files.
-     * @param chunkSize The size of chunk to read.
+     * @param factory Factory to produce IO interface on given file.
+     * @param chunkSize Size of chunks.
      */
     public FileSender(
         File file,
@@ -90,11 +95,11 @@ public class FileSender extends AbstractTransmission {
     }
 
     /**
-     * @param ch Output channel to write data to.
-     * @param oo Channel to write data to.
-     * @param connMeta Meta received on connection established.
-     * @param plc Policy of way how data will be handled on remote node.
-     * @throws IOException If an io exception occurred.
+     * @param ch Output channel to write file to.
+     * @param oo Channel to write meta info to.
+     * @param connMeta Coonnection meta received.
+     * @param plc Policy of how data will be handled on remote node.
+     * @throws IOException If a transport exception occurred.
      * @throws IgniteCheckedException If fails.
      */
     public void send(WritableByteChannel ch,
@@ -141,7 +146,7 @@ public class FileSender extends AbstractTransmission {
     }
 
     /**
-     * @param connMeta Meta file information about
+     * @param connMeta Conneciton meta info.
      * @throws IgniteCheckedException If fails.
      */
     private void state(TransmissionMeta connMeta) throws IgniteCheckedException {
@@ -169,7 +174,7 @@ public class FileSender extends AbstractTransmission {
     }
 
     /**
-     * @param ch Channel to write data into.
+     * @param ch Channel to write data to.
      * @throws IOException If fails.
      */
     private void writeChunk(WritableByteChannel ch) throws IOException {

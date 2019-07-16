@@ -96,7 +96,7 @@ abstract class AbstractTransmission implements Closeable {
     }
 
     /**
-     * @return Number of bytes which has been transfered.
+     * @return Number of bytes which has been transferred.
      */
     public long transferred() {
         return transferred;
