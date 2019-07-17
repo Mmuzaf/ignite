@@ -18,9 +18,7 @@
 package org.apache.ignite.internal.managers.communication;
 
 import java.io.IOException;
-import java.io.Serializable;
 import java.nio.channels.ReadableByteChannel;
-import java.util.Map;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 
@@ -32,27 +30,11 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  */
 abstract class AbstractReceiver extends AbstractTransmission {
     /**
-     * @param name The unique file name within transfer process.
-     * @param startPos The position from which the transfer should start to.
-     * @param cnt The number of bytes to expect of transfer.
-     * @param params Additional stream params.
+     * @param initMeta Initial file meta info.
      * @param stopChecker Node stop or prcoess interrupt checker.
      */
-    protected AbstractReceiver(
-        String name,
-        long startPos,
-        long cnt,
-        Map<String, Serializable> params,
-        Supplier<Boolean> stopChecker
-    ) {
-        super(name, startPos, cnt, params, stopChecker);
-    }
-
-    /**
-     * @return File name processing by receiver.
-     */
-    public String name() {
-        return name;
+    protected AbstractReceiver(TransmissionMeta initMeta, Supplier<Boolean> stopChecker) {
+        super(initMeta, stopChecker);
     }
 
     /**
@@ -67,16 +49,16 @@ abstract class AbstractReceiver extends AbstractTransmission {
     ) throws IOException, IgniteCheckedException {
         assert meta != null;
 
-        assertParameter(name.equals(meta.name()), "Attempt to load different file " +
-            "[name=" + name + ", meta=" + meta + ']');
+        assertParameter(name().equals(meta.name()), "Attempt to load different file " +
+            "[name=" + name() + ", meta=" + meta + ']');
 
-        assertParameter(startPos + transferred == meta.offset(),
-            "The next chunk offest is incorrect [startPos=" + startPos +
+        assertParameter(offset() + transferred == meta.offset(),
+            "The next chunk offest is incorrect [startPos=" + offset() +
                 ", transferred=" + transferred + ", meta=" + meta + ']');
 
-        assertParameter(total == meta.count() + transferred, " The count of bytes to transfer for " +
-            "the next chunk is incorrect [total=" + total + ", transferred=" + transferred +
-            ", startPos=" + startPos + ", meta=" + meta + ']');
+        assertParameter(count() == meta.count() + transferred, " The count of bytes to transfer for " +
+            "the next chunk is incorrect [total=" + count() + ", transferred=" + transferred +
+            ", startPos=" + offset() + ", meta=" + meta + ']');
 
         init(meta);
 
@@ -90,20 +72,20 @@ abstract class AbstractReceiver extends AbstractTransmission {
             readChunk(ch);
         }
 
-        assert transferred == total : "The number of transferred bytes are not as expected " +
-            "[expect=" + total + ", actual=" + transferred + ']';
+        assert transferred == count() : "The number of transferred bytes are not as expected " +
+            "[expect=" + count() + ", actual=" + transferred + ']';
     }
 
     /**
      * @return Current receiver state written to a {@link TransmissionMeta} instance.
      */
     public TransmissionMeta state() {
-        return new TransmissionMeta(name,
-            startPos + transferred,
-            total,
+        return new TransmissionMeta(name(),
+            offset() + transferred,
+            count(),
             transferred == 0,
             false,
-            params,
+            params(),
             policy(),
             null);
     }
@@ -111,7 +93,9 @@ abstract class AbstractReceiver extends AbstractTransmission {
     /**
      * @return Read policy of data handling.
      */
-    protected abstract TransmissionPolicy policy();
+    protected TransmissionPolicy policy() {
+        return initMeta.policy();
+    }
 
     /**
      * @param meta Meta information about receiving file.

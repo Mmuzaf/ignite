@@ -116,7 +116,7 @@ class TransmissionMeta implements Externalizable {
     }
 
     /**
-     * The string representation name of particular file.
+     * @return String representation file name.
      */
     public String name() {
         assert name != null;
@@ -125,7 +125,7 @@ class TransmissionMeta implements Externalizable {
     }
 
     /**
-     * @return The position to start channel transfer at.
+     * @return Position to start channel transfer at.
      */
     public long offset() {
         return offset;

@@ -19,10 +19,8 @@ package org.apache.ignite.internal.managers.communication;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.Serializable;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
-import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
@@ -55,11 +53,7 @@ class FileReceiver extends AbstractReceiver {
 
     /**
      * @param nodeId The remote node id receive request for transmission from.
-     * @param name The unique file name within transfer process.
-     * @param startPos The position from which the transfer should start to.
-     * @param cnt The number of bytes to expect of transfer.
-     * @param params Additional stream params.
-     * @param chunkSize Size of chunks.
+     * @param initMeta Initial file meta info.
      * @param stopChecker Node stop or prcoess interrupt checker.
      * @param factory Factory to produce IO interface on files.
      * @param hnd Transmission handler to process download result.
@@ -67,22 +61,20 @@ class FileReceiver extends AbstractReceiver {
      */
     public FileReceiver(
         UUID nodeId,
-        String name,
-        long startPos,
-        long cnt,
-        Map<String, Serializable> params,
+        TransmissionMeta initMeta,
         int chunkSize,
         Supplier<Boolean> stopChecker,
         FileIOFactory factory,
         TransmissionHandler hnd
     ) throws IgniteCheckedException {
-        super(name, startPos, cnt, params, stopChecker);
+        super(initMeta, stopChecker);
 
         assert chunkSize > 0;
+        assert initMeta.policy() == TransmissionPolicy.FILE : initMeta.policy();
 
         this.chunkSize = chunkSize;
         fileIoFactory = factory;
-        this.hnd = hnd.fileHandler(nodeId, name, startPos, cnt, params);
+        this.hnd = hnd.fileHandler(nodeId, name(), offset(), count(), params());
 
         assert this.hnd != null : "FileHandler must be provided by transmission handler";
 
@@ -102,13 +94,8 @@ class FileReceiver extends AbstractReceiver {
     ) throws IOException, IgniteCheckedException {
         super.receive(ch, meta);
 
-        if (transferred == total)
+        if (transferred == count())
             hnd.accept(file);
-    }
-
-    /** {@inheritDoc} */
-    @Override protected TransmissionPolicy policy() {
-        return TransmissionPolicy.FILE;
     }
 
     /** {@inheritDoc} */
@@ -116,14 +103,14 @@ class FileReceiver extends AbstractReceiver {
         assert meta != null;
         assert fileIo == null;
 
-        assertParameter(!meta.initial() || meta.name().equals(name), "Read operation stopped. " +
+        assertParameter(!meta.initial() || meta.name().equals(name()), "Read operation stopped. " +
             "Attempt to receive a new file from channel, while the previous was not fully loaded " +
-            "[meta=" + meta + ", prevFile=" + name + ']');
+            "[meta=" + meta + ", prevFile=" + name() + ']');
 
         try {
             fileIo = fileIoFactory.create(file);
 
-            fileIo.position(startPos + transferred);
+            fileIo.position(offset() + transferred);
         }
         catch (IOException e) {
             throw new IgniteCheckedException("Unable to open destination file. Receiver will will be stopped", e);
@@ -132,9 +119,9 @@ class FileReceiver extends AbstractReceiver {
 
     /** {@inheritDoc} */
     @Override protected void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
-        long batchSize = Math.min(chunkSize, total - transferred);
+        long batchSize = Math.min(chunkSize, count() - transferred);
 
-        long readed = fileIo.transferFrom(ch, startPos + transferred, batchSize);
+        long readed = fileIo.transferFrom(ch, offset() + transferred, batchSize);
 
         if (readed > 0)
             transferred += readed;

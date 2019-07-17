@@ -2837,10 +2837,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
             case FILE:
                 return new FileReceiver(
                     nodeId,
-                    meta.name(),
-                    meta.offset(),
-                    meta.count(),
-                    meta.params(),
+                    meta,
                     chunkSize,
                     stopChecker,
                     fileIoFactory,
@@ -2849,10 +2846,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
             case CHUNK:
                 return new ChunkReceiver(
                     nodeId,
-                    meta.name(),
-                    meta.offset(),
-                    meta.count(),
-                    meta.params(),
+                    meta,
                     chunkSize,
                     stopChecker,
                     hnd);
@@ -3155,7 +3149,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                             "will be re-establishing [remoteId=" + remoteId + ", file=" + file.getName() +
                             ", sesKey=" + sesKey + ", retries=" + retries +
                             ", transferred=" + snd.transferred() +
-                            ", total=" + snd.total() + ']', e);
+                            ", total=" + snd.count() + ']', e);
 
                         retries++;
 

@@ -18,11 +18,9 @@
 package org.apache.ignite.internal.managers.communication;
 
 import java.io.IOException;
-import java.io.Serializable;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.ReadableByteChannel;
-import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
@@ -41,10 +39,7 @@ class ChunkReceiver extends AbstractReceiver {
 
     /**
      * @param nodeId The remote node id receive request for transmission from.
-     * @param name The unique file name within transfer process.
-     * @param startPos The position from which the transfer should start to.
-     * @param cnt The number of bytes to expect of transfer.
-     * @param params Additional stream params.
+     * @param initMeta Initial file meta info.
      * @param chunkSize Size of chunks.
      * @param stopChecker Node stop or prcoess interrupt checker.
      * @param hnd Transmission handler to process download result.
@@ -52,19 +47,17 @@ class ChunkReceiver extends AbstractReceiver {
      */
     public ChunkReceiver(
         UUID nodeId,
-        String name,
-        long startPos,
-        long cnt,
-        Map<String, Serializable> params,
+        TransmissionMeta initMeta,
         int chunkSize,
         Supplier<Boolean> stopChecker,
         TransmissionHandler hnd
     ) throws IgniteCheckedException {
-        super(name, startPos, cnt, params, stopChecker);
+        super(initMeta, stopChecker);
 
         assert chunkSize > 0;
+        assert initMeta.policy() == TransmissionPolicy.CHUNK : initMeta.policy();
 
-        this.hnd = hnd.chunkHandler(nodeId, name, startPos, cnt, params);
+        this.hnd = hnd.chunkHandler(nodeId, name(), offset(), count(), params());
 
         assert this.hnd != null : "ChunkHandler must be provided by transmission handler";
 
@@ -86,13 +79,8 @@ class ChunkReceiver extends AbstractReceiver {
         }
 
         // If an IOException occurs, reconnect will happen.
-        if (transferred == total)
+        if (transferred == count())
             hnd.close();
-    }
-
-    /** {@inheritDoc} */
-    @Override protected TransmissionPolicy policy() {
-        return TransmissionPolicy.CHUNK;
     }
 
     /** {@inheritDoc} */
@@ -120,9 +108,9 @@ class ChunkReceiver extends AbstractReceiver {
 
             // Read will return -1 if remote node close connection.
             if (res < 0) {
-                if (transferred + readed != total) {
+                if (transferred + readed != count()) {
                     throw new IOException("Input data channel reached its end, but file has not fully loaded " +
-                        "[transferred=" + transferred + ", readed=" + readed + ", total=" + total + ']');
+                        "[transferred=" + transferred + ", readed=" + readed + ", total=" + count() + ']');
                 }
 
                 break;

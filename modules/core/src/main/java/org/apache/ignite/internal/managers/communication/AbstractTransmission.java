@@ -18,13 +18,10 @@
 package org.apache.ignite.internal.managers.communication;
 
 import java.io.Closeable;
-import java.io.File;
 import java.io.Serializable;
 import java.nio.channels.SocketChannel;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
-import org.apache.ignite.internal.util.tostring.GridToStringInclude;
 import org.apache.ignite.internal.util.typedef.internal.A;
 import org.apache.ignite.internal.util.typedef.internal.S;
 
@@ -36,21 +33,8 @@ abstract class AbstractTransmission implements Closeable {
     /** Node stopping checker. */
     private final Supplier<Boolean> stopChecker;
 
-    /**
-     * The position from which the transfer will start. For the {@link File} it will be offset
-     * where the transfer begin data transfer.
-     */
-    protected final long startPos;
-
-    /** The total number of bytes to send or receive. */
-    protected final long total;
-
-    /** The unique input name to identify particular transfer part. */
-    protected final String name;
-
-    /** Additional stream params. */
-    @GridToStringInclude
-    protected final Map<String, Serializable> params = new HashMap<>();
+    /** Initial meta with file transferred attributes. */
+    protected final TransmissionMeta initMeta;
 
     /** The number of bytes successfully transferred druring iteration. */
     protected long transferred;
@@ -59,38 +43,46 @@ abstract class AbstractTransmission implements Closeable {
     protected int chunkSize;
 
     /**
-     * @param name The unique file name within transfer process.
-     * @param startPos The position from which the transfer should start to.
-     * @param total The number of bytes to expect of transfer.
-     * @param params Additional stream params.
+     * @param initMeta Initial file meta info.
      * @param stopChecker Node stop or prcoess interrupt checker.
      */
-    protected AbstractTransmission(
-        String name,
-        long startPos,
-        long total,
-        Map<String, Serializable> params,
-        Supplier<Boolean> stopChecker
-    ) {
-        A.notNullOrEmpty(name, "Trasmisson name cannot be empty or null");
-        A.ensure(startPos >= 0, "File start position cannot be negative");
-        A.ensure(total > 0, "Total number of bytes to transfer must be greater than zero");
+    protected AbstractTransmission(TransmissionMeta initMeta, Supplier<Boolean> stopChecker) {
+        A.notNull(initMeta, "Initial file meta cannot be null");
+        A.notNullOrEmpty(initMeta.name(), "Trasmisson name cannot be empty or null");
+        A.ensure(initMeta.offset() >= 0, "File start position cannot be negative");
+        A.ensure(initMeta.count() > 0, "Total number of bytes to transfer must be greater than zero");
         A.notNull(stopChecker, "Process stop checker cannot be null");
 
-        this.name = name;
-        this.startPos = startPos;
-        this.total = total;
         this.stopChecker = stopChecker;
+        this.initMeta = initMeta;
+    }
 
-        if (params != null)
-            this.params.putAll(params);
+    /**
+     * @return String representation file name.
+     */
+    public String name() {
+        return initMeta.name();
+    }
+
+    /**
+     * @return Transferred file position offset.
+     */
+    public long offset() {
+        return initMeta.offset();
     }
 
     /**
      * @return Number of bytes to transfer (read from or write to channel).
      */
-    public long total() {
-        return total;
+    public long count() {
+        return initMeta.count();
+    }
+
+    /**
+     * @return Map of additional file params.
+     */
+    public Map<String, Serializable> params() {
+        return initMeta.params();
     }
 
     /**
@@ -111,7 +103,7 @@ abstract class AbstractTransmission implements Closeable {
      * @return {@code true} if and only if a chunked object has received all the data it expects.
      */
     protected boolean hasNextChunk() {
-        return transferred < total;
+        return transferred < initMeta.count();
     }
 
     /** {@inheritDoc} */
