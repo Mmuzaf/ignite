@@ -23,7 +23,6 @@ import java.io.Serializable;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
@@ -83,8 +82,17 @@ class FileReceiver extends AbstractReceiver {
 
         this.chunkSize = chunkSize;
         fileIoFactory = factory;
-        this.hnd = Objects.requireNonNull(hnd.fileHandler(nodeId, name, startPos, cnt, params),
-            "FileHandler must be provided by transmission handler");
+        this.hnd = hnd.fileHandler(nodeId, name, startPos, cnt, params);
+
+        assert this.hnd != null : "FileHandler must be provided by transmission handler";
+
+        String fileAbsPath = this.hnd.path();
+
+        if (fileAbsPath == null || fileAbsPath.trim().isEmpty())
+            throw new IgniteCheckedException("File receiver absolute path cannot be empty or null. Receiver cannot be" +
+                " initialized: " + this);
+
+        file = new File(fileAbsPath);
     }
 
     /** {@inheritDoc} */
@@ -106,27 +114,16 @@ class FileReceiver extends AbstractReceiver {
     /** {@inheritDoc} */
     @Override protected void init(TransmissionMeta meta) throws IgniteCheckedException {
         assert meta != null;
+        assert fileIo == null;
 
-        if (file == null) {
-            String fileAbsPath = hnd.path();
-
-            if (fileAbsPath == null || fileAbsPath.trim().isEmpty())
-                throw new IgniteCheckedException("File receiver absolute path cannot be empty or null. Receiver cannot be" +
-                    " initialized: " + this);
-
-            file = new File(fileAbsPath);
-        }
-        else {
-            assertParameter(!meta.initial(), "Read operation stopped. Attempt to receive a new file from channel, " +
-                "while the previous was not fully loaded [meta=" + meta + ", prevFile=" + name + ']');
-        }
+        assertParameter(!meta.initial() || meta.name().equals(name), "Read operation stopped. " +
+            "Attempt to receive a new file from channel, while the previous was not fully loaded " +
+            "[meta=" + meta + ", prevFile=" + name + ']');
 
         try {
-            if (fileIo == null) {
-                fileIo = fileIoFactory.create(file);
+            fileIo = fileIoFactory.create(file);
 
-                fileIo.position(startPos + transferred);
-            }
+            fileIo.position(startPos + transferred);
         }
         catch (IOException e) {
             throw new IgniteCheckedException("Unable to open destination file. Receiver will will be stopped", e);

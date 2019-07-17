@@ -90,7 +90,8 @@ abstract class AbstractReceiver extends AbstractTransmission {
             readChunk(ch);
         }
 
-        assertTransferredBytes();
+        assert transferred == total : "The number of transferred bytes are not as expected " +
+            "[expect=" + total + ", actual=" + transferred + ']';
     }
 
     /**

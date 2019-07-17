@@ -23,7 +23,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.ReadableByteChannel;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
@@ -65,8 +64,9 @@ class ChunkReceiver extends AbstractReceiver {
 
         assert chunkSize > 0;
 
-        this.hnd = Objects.requireNonNull(hnd.chunkHandler(nodeId, name, startPos, cnt, params),
-            "ChunkHandler must be provided by transmission handler");
+        this.hnd = hnd.chunkHandler(nodeId, name, startPos, cnt, params);
+
+        assert this.hnd != null : "ChunkHandler must be provided by transmission handler";
 
         int buffSize = this.hnd.size();
         this.chunkSize = buffSize > 0 ? buffSize : chunkSize;;
@@ -77,8 +77,15 @@ class ChunkReceiver extends AbstractReceiver {
         ReadableByteChannel ch,
         TransmissionMeta meta
     ) throws IOException, IgniteCheckedException {
-        super.receive(ch, meta);
+        try {
+            super.receive(ch, meta);
+        } catch (IgniteCheckedException e) {
+            hnd.close();
 
+            throw e;
+        }
+
+        // If an IOException occurs, reconnect will happen.
         if (transferred == total)
             hnd.close();
     }

@@ -140,7 +140,7 @@ class FileSender extends AbstractTransmission {
             writeChunk(ch);
         }
 
-        assertTransferredBytes();
+        assert transferred == total : "File is not fully transferred [expect=" + total + ", actual=" + transferred + ']';
     }
 
     /**
