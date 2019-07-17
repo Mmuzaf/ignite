@@ -61,6 +61,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.apache.ignite.internal.processors.cache.persistence.file.FilePageStoreManager.FILE_SUFFIX;
+import static org.apache.ignite.internal.util.IgniteUtils.fileCount;
 
 /**
  * Test file transmission mamanger operations.
@@ -265,7 +266,7 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
      * @throws Exception If fails.
      */
     @Test(expected = IgniteCheckedException.class)
-    public void testFileHandlerOnReceiverNodeLeft() throws Exception {
+    public void testFileHandlerOnReceiverLeft() throws Exception {
         final int fileSizeBytes = 5 * 1024 * 1024;
         final AtomicInteger chunksCnt = new AtomicInteger();
 
@@ -307,6 +308,61 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             .openTransmissionSender(rcv.localNode().id(), topic)) {
             sender.send(fileToSend, TransmissionPolicy.FILE);
         }
+    }
+
+    /**
+     * @throws Exception If fails.
+     */
+    @Test
+    public void testFileHandlerCleanedUpIfSenderLeft() throws Exception {
+        final CountDownLatch latch = new CountDownLatch(1);
+
+        IgniteEx snd = startGrid(0);
+        IgniteEx rcv = startGrid(1);
+
+        snd.cluster().active(true);
+
+        File fileToSend = createFileRandomData("tempFile15Mb", 15 * 1024 * 1024);
+
+        snd.context().io().transfererFileIoFactory(new FileIOFactory() {
+            @Override public FileIO create(File file, OpenOption... modes) throws IOException {
+                FileIO fileIo = IO_FACTORY.create(file, modes);
+
+                return new FileIODecorator(fileIo) {
+                    /** {@inheritDoc} */
+                    @Override public long transferTo(long position, long count, WritableByteChannel target)
+                        throws IOException {
+
+                        long transferred = super.transferTo(position, count, target);
+
+                        stopGrid(snd.name(), true);
+
+                        return transferred;
+                    }
+                };
+            }
+        });
+
+        rcv.context().io().addTransmissionHandler(topic, new TransmissionHandlerAdapter() {
+            @Override public FileHandler fileHandler(UUID nodeId, String name, long offset, long cnt,
+                Map<String, Serializable> params) {
+                return getDefaultFileHandler(rcv, fileToSend, name);
+            }
+        });
+
+        try (GridIoManager.TransmissionSender sender = snd.context()
+            .io()
+            .openTransmissionSender(rcv.localNode().id(), topic)) {
+            sender.send(fileToSend, TransmissionPolicy.FILE);
+        }
+        catch (IgniteCheckedException e) {
+            // Ignore node stopping exception.
+            U.log(log,"Expected node stopping exception", e);
+        }
+
+        assertEquals("Uncomplete resources must be cleaned up on sender left",
+            1, // only fileToSend is expected to exist
+            fileCount(tempStore.toPath()));
     }
 
     /**

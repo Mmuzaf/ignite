@@ -22,6 +22,7 @@ import java.io.Serializable;
 import java.nio.channels.SocketChannel;
 import java.util.Map;
 import java.util.function.Supplier;
+import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.internal.util.typedef.internal.A;
 import org.apache.ignite.internal.util.typedef.internal.S;
 
@@ -32,6 +33,9 @@ import org.apache.ignite.internal.util.typedef.internal.S;
 abstract class AbstractTransmission implements Closeable {
     /** Node stopping checker. */
     private final Supplier<Boolean> stopChecker;
+
+    /** Ignite logger. */
+    protected final IgniteLogger log;
 
     /** Initial meta with file transferred attributes. */
     protected final TransmissionMeta initMeta;
@@ -45,8 +49,9 @@ abstract class AbstractTransmission implements Closeable {
     /**
      * @param initMeta Initial file meta info.
      * @param stopChecker Node stop or prcoess interrupt checker.
+     * @param log Ignite logger.
      */
-    protected AbstractTransmission(TransmissionMeta initMeta, Supplier<Boolean> stopChecker) {
+    protected AbstractTransmission(TransmissionMeta initMeta, Supplier<Boolean> stopChecker, IgniteLogger log) {
         A.notNull(initMeta, "Initial file meta cannot be null");
         A.notNullOrEmpty(initMeta.name(), "Trasmisson name cannot be empty or null");
         A.ensure(initMeta.offset() >= 0, "File start position cannot be negative");
@@ -55,6 +60,7 @@ abstract class AbstractTransmission implements Closeable {
 
         this.stopChecker = stopChecker;
         this.initMeta = initMeta;
+        this.log = log.getLogger(AbstractTransmission.class);
     }
 
     /**

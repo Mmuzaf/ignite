@@ -10531,8 +10531,10 @@ public abstract class IgniteUtils {
                 if (Files.isDirectory(d))
                     cnt += fileCount(d);
 
-                else if (Files.isRegularFile(d))
+                else if (Files.isRegularFile(d)) {
                     cnt++;
+                    System.out.println("File == " + d.toFile().getName());
+                }
             }
         }
 

@@ -47,9 +47,6 @@ import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
  * @see FileChannel#transferTo(long, long, WritableByteChannel)
  */
 class FileSender extends AbstractTransmission {
-    /** Ignite logger. */
-    private final IgniteLogger log;
-
     /** Default factory to provide IO oprations over given file. */
     @GridToStringExclude
     private final FileIOFactory fileIoFactory;
@@ -81,7 +78,9 @@ class FileSender extends AbstractTransmission {
         FileIOFactory factory,
         int chunkSize
     ) {
-        super(new TransmissionMeta(file.getName(), pos, cnt, true, false, params, null, null), stopChecker);
+        super(new TransmissionMeta(file.getName(), pos, cnt, true, false, params, null, null),
+            stopChecker,
+            log);
 
         assert file != null;
         assert chunkSize > 0;
@@ -89,7 +88,6 @@ class FileSender extends AbstractTransmission {
         this.file = file;
         this.chunkSize = chunkSize;
         fileIoFactory = factory;
-        this.log = log.getLogger(FileSender.class);
     }
 
     /**

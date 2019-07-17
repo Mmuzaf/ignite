@@ -24,7 +24,9 @@ import java.nio.channels.ReadableByteChannel;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.internal.util.typedef.internal.S;
+import org.apache.ignite.internal.util.typedef.internal.U;
 
 /**
  * Buffered chunked receiver can handle input socket channel by chunks of data and
@@ -43,6 +45,7 @@ class ChunkReceiver extends AbstractReceiver {
      * @param chunkSize Size of chunks.
      * @param stopChecker Node stop or prcoess interrupt checker.
      * @param hnd Transmission handler to process download result.
+     * @param log Ignite looger.
      * @throws IgniteCheckedException If fails.
      */
     public ChunkReceiver(
@@ -50,9 +53,10 @@ class ChunkReceiver extends AbstractReceiver {
         TransmissionMeta initMeta,
         int chunkSize,
         Supplier<Boolean> stopChecker,
-        TransmissionHandler hnd
+        TransmissionHandler hnd,
+        IgniteLogger log
     ) throws IgniteCheckedException {
-        super(initMeta, stopChecker);
+        super(initMeta, stopChecker, log);
 
         assert chunkSize > 0;
         assert initMeta.policy() == TransmissionPolicy.CHUNK : initMeta.policy();
@@ -73,7 +77,7 @@ class ChunkReceiver extends AbstractReceiver {
         try {
             super.receive(ch, meta);
         } catch (IgniteCheckedException e) {
-            hnd.close();
+            cleanupResources();
 
             throw e;
         }
@@ -81,6 +85,17 @@ class ChunkReceiver extends AbstractReceiver {
         // If an IOException occurs, reconnect will happen.
         if (transferred == count())
             hnd.close();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void cleanupResources() {
+        try {
+            hnd.close();
+            buf = null;
+        }
+        catch (IOException e) {
+            U.error(log, "Error closing chunk handler", e);
+        }
     }
 
     /** {@inheritDoc} */

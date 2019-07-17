@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.channels.ReadableByteChannel;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.IgniteLogger;
 
 import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
 
@@ -32,9 +33,10 @@ abstract class AbstractReceiver extends AbstractTransmission {
     /**
      * @param initMeta Initial file meta info.
      * @param stopChecker Node stop or prcoess interrupt checker.
+     * @param log Ignite logger.
      */
-    protected AbstractReceiver(TransmissionMeta initMeta, Supplier<Boolean> stopChecker) {
-        super(initMeta, stopChecker);
+    protected AbstractReceiver(TransmissionMeta initMeta, Supplier<Boolean> stopChecker, IgniteLogger log) {
+        super(initMeta, stopChecker, log);
     }
 
     /**
@@ -96,6 +98,11 @@ abstract class AbstractReceiver extends AbstractTransmission {
     protected TransmissionPolicy policy() {
         return initMeta.policy();
     }
+
+    /**
+     * Release receivers resources.
+     */
+    public abstract void cleanupResources();
 
     /**
      * @param meta Meta information about receiving file.

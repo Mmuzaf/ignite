@@ -895,6 +895,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                                         "The remote node node left the grid: " + nodeId));
 
                                     ioctx.interrupted = true;
+                                    ioctx.lastRcv.cleanupResources();
 
                                     rcvCtxs.remove(sesEntry.getKey());
                                 }
@@ -2841,7 +2842,8 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     chunkSize,
                     stopChecker,
                     fileIoFactory,
-                    hnd);
+                    hnd,
+                    log);
 
             case CHUNK:
                 return new ChunkReceiver(
@@ -2849,7 +2851,8 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     meta,
                     chunkSize,
                     stopChecker,
-                    hnd);
+                    hnd,
+                    log);
 
             default:
                 throw new IgniteCheckedException("The type of read plc is unknown. The impelentation " +

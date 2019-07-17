@@ -21,9 +21,11 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.file.Files;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
@@ -57,6 +59,7 @@ class FileReceiver extends AbstractReceiver {
      * @param stopChecker Node stop or prcoess interrupt checker.
      * @param factory Factory to produce IO interface on files.
      * @param hnd Transmission handler to process download result.
+     * @param log Ignite logger.
      * @throws IgniteCheckedException If fails.
      */
     public FileReceiver(
@@ -65,9 +68,10 @@ class FileReceiver extends AbstractReceiver {
         int chunkSize,
         Supplier<Boolean> stopChecker,
         FileIOFactory factory,
-        TransmissionHandler hnd
+        TransmissionHandler hnd,
+        IgniteLogger log
     ) throws IgniteCheckedException {
-        super(initMeta, stopChecker);
+        super(initMeta, stopChecker, log);
 
         assert chunkSize > 0;
         assert initMeta.policy() == TransmissionPolicy.FILE : initMeta.policy();
@@ -99,6 +103,21 @@ class FileReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
+    @Override public void cleanupResources() {
+        if (transferred == count())
+            return;
+
+        try {
+            U.closeQuiet(fileIo);
+
+            Files.delete(file.toPath());
+        }
+        catch (IOException e) {
+            U.error(log, "Error deleting not fully loaded file", e);
+        }
+    }
+
+    /** {@inheritDoc} */
     @Override protected void init(TransmissionMeta meta) throws IgniteCheckedException {
         assert meta != null;
         assert fileIo == null;
@@ -118,7 +137,7 @@ class FileReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override protected void readChunk(ReadableByteChannel ch) throws IOException, IgniteCheckedException {
+    @Override protected void readChunk(ReadableByteChannel ch) throws IOException {
         long batchSize = Math.min(chunkSize, count() - transferred);
 
         long readed = fileIo.transferFrom(ch, offset() + transferred, batchSize);
