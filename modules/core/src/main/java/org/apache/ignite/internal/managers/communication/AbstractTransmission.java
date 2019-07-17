@@ -28,8 +28,6 @@ import org.apache.ignite.internal.util.tostring.GridToStringInclude;
 import org.apache.ignite.internal.util.typedef.internal.A;
 import org.apache.ignite.internal.util.typedef.internal.S;
 
-import static org.apache.ignite.internal.util.IgniteUtils.assertParameter;
-
 /**
  * Class represents base object which can transmit files (read or write) by chunks of
  * predefined size over an opened {@link SocketChannel}.
@@ -114,14 +112,6 @@ abstract class AbstractTransmission implements Closeable {
      */
     protected boolean hasNextChunk() {
         return transferred < total;
-    }
-
-    /**
-     * Check actual transferred bytes not excedeed the limit.
-     */
-    protected void assertTransferredBytes() {
-        assertParameter(transferred <= total, "File has been transferred with incorrect size " +
-            "[expect=" + total + ", actual=" + transferred + ']');
     }
 
     /** {@inheritDoc} */
