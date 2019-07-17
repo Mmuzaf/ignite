@@ -123,9 +123,9 @@ class FileSender extends AbstractTransmission {
             startPos + transferred,
             total - transferred,
             transferred == 0,
+            false,
             params,
             plc,
-            null,
             null)
             .writeExternal(oo);
 

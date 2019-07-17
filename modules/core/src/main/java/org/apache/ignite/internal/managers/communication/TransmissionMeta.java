@@ -28,15 +28,13 @@ import java.util.Map;
 import java.util.Objects;
 import org.apache.ignite.internal.util.typedef.internal.S;
 
-import static java.util.Optional.ofNullable;
-
 /**
  * Class represents a file meta information to send to the remote node. Used to initiate a new file transfer
  * process or to continue the previous unfinished from the last transmitted point.
  */
 class TransmissionMeta implements Externalizable {
     /** Default close session instance. The transmit session will be closed if such object received. */
-    public static final TransmissionMeta CLOSED = new TransmissionMeta("", -1, -1, true, null, null, null, true);
+    public static final TransmissionMeta CLOSED = new TransmissionMeta("", -1, -1, true, true, null, null, null);
 
     /** Serial version uid. */
     private static final long serialVersionUID = 0L;
@@ -56,6 +54,9 @@ class TransmissionMeta implements Externalizable {
     /** The initial meta info for the file transferred the first time. */
     private boolean initial;
 
+    /** Session close state. If not {@code null} that session must be closed. */
+    private boolean exit;
+
     /** Additional file params to transfer (e.g. partition id, partition name etc.). */
     private HashMap<String, Serializable> map = new HashMap<>();
 
@@ -64,9 +65,6 @@ class TransmissionMeta implements Externalizable {
 
     /** Last seen error if it has been occurred, or {@code null} the otherwise. */
     private Exception err;
-
-    /** Session close state. If not {@code null} that session must be closed. */
-    private Boolean exit;
 
     /**
      * Default constructor, usually used to create meta to read channel data into.
@@ -79,7 +77,7 @@ class TransmissionMeta implements Externalizable {
      * @param err Last seen error if it has been occurred, or {@code null} the otherwise.
      */
     public TransmissionMeta(Exception err) {
-        this("", -1, -1, true, null, null, err, null);
+        this("", -1, -1, true, false, null, null, err);
     }
 
     /**
@@ -97,15 +95,16 @@ class TransmissionMeta implements Externalizable {
         long offset,
         long cnt,
         boolean initial,
+        boolean exit,
         Map<String, Serializable> params,
         TransmissionPolicy plc,
-        Exception err,
-        Boolean exit
+        Exception err
     ) {
         this.name = name;
         this.offset = offset;
         this.cnt = cnt;
         this.initial = initial;
+        this.exit = exit;
 
         if (params != null) {
             for (Map.Entry<String, Serializable> key : params.entrySet())
@@ -114,7 +113,6 @@ class TransmissionMeta implements Externalizable {
 
         this.plc = plc;
         this.err = err;
-        this.exit = exit;
     }
 
     /**
@@ -148,6 +146,13 @@ class TransmissionMeta implements Externalizable {
     }
 
     /**
+     * @return {@code true} if session must be closed.
+     */
+    public boolean exit() {
+        return exit;
+    }
+
+    /**
      * @return The map of additional keys.
      */
     public Map<String, Serializable> params() {
@@ -177,23 +182,16 @@ class TransmissionMeta implements Externalizable {
         return err;
     }
 
-    /**
-     * @return {@code true} if session must be closed.
-     */
-    public boolean exit() {
-        return ofNullable(exit).orElse(Boolean.FALSE);
-    }
-
     /** {@inheritDoc} */
     @Override public void writeExternal(ObjectOutput out) throws IOException {
         out.writeUTF(name());
         out.writeLong(offset);
         out.writeLong(cnt);
         out.writeBoolean(initial);
+        out.writeBoolean(exit);
         out.writeObject(map);
         out.writeObject(plc);
         out.writeObject(err);
-        out.writeObject(exit);
     }
 
     /** {@inheritDoc} */
@@ -203,10 +201,10 @@ class TransmissionMeta implements Externalizable {
             offset = in.readLong();
             cnt = in.readLong();
             initial = in.readBoolean();
+            exit = in.readBoolean();
             map = (HashMap)in.readObject();
             plc = (TransmissionPolicy)in.readObject();
             err = (Exception)in.readObject();
-            exit = (Boolean)in.readObject();
         }
         catch (ClassNotFoundException e) {
             throw new IOException("Required class information for deserializing meta not found", e);
