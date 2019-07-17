@@ -324,7 +324,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
     private MessageFormatter formatter;
 
     /** Stopping flag. */
-    private boolean stopping;
+    private volatile boolean stopping;
 
     /** */
     private final AtomicReference<ConcurrentHashMap<Long, IoTestFuture>> ioTestMap = new AtomicReference<>();
