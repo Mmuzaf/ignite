@@ -98,6 +98,7 @@ class ChunkReceiver extends AbstractReceiver {
     /** {@inheritDoc} */
     @Override protected void init(TransmissionMeta meta) throws IgniteCheckedException {
         assert meta != null;
+        assert buf == null;
 
         buf = ByteBuffer.allocate(chunkSize);
         buf.order(ByteOrder.nativeOrder());
