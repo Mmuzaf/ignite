@@ -80,13 +80,12 @@ class FileSender extends AbstractTransmission {
     ) {
         super(new TransmissionMeta(file.getName(), pos, cnt, true, false, params, null, null),
             stopChecker,
-            log);
+            log,
+            chunkSize);
 
         assert file != null;
-        assert chunkSize > 0;
 
         this.file = file;
-        this.chunkSize = chunkSize;
         fileIoFactory = factory;
     }
 

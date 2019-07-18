@@ -28,6 +28,7 @@ import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIOFactory;
+import org.apache.ignite.internal.util.lang.IgniteThrowableConsumer;
 import org.apache.ignite.internal.util.tostring.GridToStringExclude;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
@@ -44,7 +45,7 @@ class FileReceiver extends AbstractReceiver {
     private final FileIOFactory fileIoFactory;
 
     /** Handler to notify when a file has been processed. */
-    private final FileHandler hnd;
+    private final IgniteThrowableConsumer<File> hnd;
 
     /** The abstract java representation of the chunked file. */
     private File file;
@@ -71,18 +72,16 @@ class FileReceiver extends AbstractReceiver {
         TransmissionHandler hnd,
         IgniteLogger log
     ) throws IgniteCheckedException {
-        super(initMeta, stopChecker, log);
+        super(initMeta, stopChecker, log, chunkSize);
 
-        assert chunkSize > 0;
         assert initMeta.policy() == TransmissionPolicy.FILE : initMeta.policy();
 
-        this.chunkSize = chunkSize;
         fileIoFactory = factory;
-        this.hnd = hnd.fileHandler(nodeId, name(), offset(), count(), params());
+        this.hnd = hnd.fileHandler(nodeId, initMeta);
 
         assert this.hnd != null : "FileHandler must be provided by transmission handler";
 
-        String fileAbsPath = this.hnd.path();
+        String fileAbsPath = hnd.filePath(nodeId, initMeta);
 
         if (fileAbsPath == null || fileAbsPath.trim().isEmpty())
             throw new IgniteCheckedException("File receiver absolute path cannot be empty or null. Receiver cannot be" +
@@ -103,7 +102,7 @@ class FileReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override public void cleanupResources() {
+    @Override public void cleanup() {
         if (transferred == count())
             return;
 

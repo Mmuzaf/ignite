@@ -895,7 +895,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                                         "The remote node node left the grid: " + nodeId));
 
                                     ioctx.interrupted = true;
-                                    ioctx.lastRcv.cleanupResources();
+                                    ioctx.lastRcv.cleanup();
 
                                     rcvCtxs.remove(sesEntry.getKey());
                                 }
@@ -2764,7 +2764,6 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     rcvCtx.lastRcv = createReceiver(rcvCtx.nodeId,
                         rcvCtx.hnd,
                         meta,
-                        chunkSize,
                         () -> stopping || rcvCtx.interrupted);
                 }
 
@@ -2819,7 +2818,6 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * @param nodeId Remote node id.
      * @param hnd Currnet handler instance which produces file handlers.
      * @param meta Meta information about file pending to receive to create appropriate receiver.
-     * @param chunkSize Size of chunks.
      * @param stopChecker Process interrupt checker.
      * @return Chunk data recevier.
      * @throws IgniteCheckedException If fails.
@@ -2828,7 +2826,6 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         UUID nodeId,
         TransmissionHandler hnd,
         TransmissionMeta meta,
-        int chunkSize,
         Supplier<Boolean> stopChecker
     ) throws IgniteCheckedException {
         assertParameter(meta.initial(), "Read operation stopped. Attempt to receive a new file from channel, " +
@@ -2849,7 +2846,9 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 return new ChunkReceiver(
                     nodeId,
                     meta,
-                    chunkSize,
+                    ctx.config()
+                        .getDataStorageConfiguration()
+                        .getPageSize(),
                     stopChecker,
                     hnd,
                     log);
@@ -2956,9 +2955,11 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * <h2>File and Chunk handlers</h2>
      * <p>
      * It is possible to choose a file handler prior to sendig the file to remote node  within opened transmission
-     * session. There are two types of handlers available: {@link ChunkHandler} and {@link FileHandler}. You can use an
-     * appropriate {@link TransmissionPolicy} for {@link #send(File, long, long, Map, TransmissionPolicy)} method
-     * to switch between them.
+     * session. There are two types of handlers available:
+     * {@link TransmissionHandler#chunkHandler(UUID, TransmissionMeta)} and
+     * {@link TransmissionHandler#fileHandler(UUID, TransmissionMeta)}. You can use an appropriate
+     * {@link TransmissionPolicy} for {@link #send(File, long, long, Map, TransmissionPolicy)} method to switch
+     * between them.
      *
      * <h2>Exceptions handling</h2>
      * <p>

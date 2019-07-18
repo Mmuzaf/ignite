@@ -34,9 +34,15 @@ abstract class AbstractReceiver extends AbstractTransmission {
      * @param initMeta Initial file meta info.
      * @param stopChecker Node stop or prcoess interrupt checker.
      * @param log Ignite logger.
+     * @param chunkSize Size of chunks.
      */
-    protected AbstractReceiver(TransmissionMeta initMeta, Supplier<Boolean> stopChecker, IgniteLogger log) {
-        super(initMeta, stopChecker, log);
+    protected AbstractReceiver(
+        TransmissionMeta initMeta,
+        Supplier<Boolean> stopChecker,
+        IgniteLogger log,
+        int chunkSize
+    ) {
+        super(initMeta, stopChecker, log, chunkSize);
     }
 
     /**
@@ -102,7 +108,7 @@ abstract class AbstractReceiver extends AbstractTransmission {
     /**
      * Release receivers resources.
      */
-    public abstract void cleanupResources();
+    public abstract void cleanup();
 
     /**
      * @param meta Meta information about receiving file.

@@ -34,6 +34,9 @@ abstract class AbstractTransmission implements Closeable {
     /** Node stopping checker. */
     private final Supplier<Boolean> stopChecker;
 
+    /** The size of segment for the read. */
+    protected final int chunkSize;
+
     /** Ignite logger. */
     protected final IgniteLogger log;
 
@@ -43,24 +46,29 @@ abstract class AbstractTransmission implements Closeable {
     /** The number of bytes successfully transferred druring iteration. */
     protected long transferred;
 
-    /** The size of segment for the read. */
-    protected int chunkSize;
-
     /**
      * @param initMeta Initial file meta info.
      * @param stopChecker Node stop or prcoess interrupt checker.
      * @param log Ignite logger.
+     * @param chunkSize Size of chunks.
      */
-    protected AbstractTransmission(TransmissionMeta initMeta, Supplier<Boolean> stopChecker, IgniteLogger log) {
+    protected AbstractTransmission(
+        TransmissionMeta initMeta,
+        Supplier<Boolean> stopChecker,
+        IgniteLogger log,
+        int chunkSize
+    ) {
         A.notNull(initMeta, "Initial file meta cannot be null");
         A.notNullOrEmpty(initMeta.name(), "Trasmisson name cannot be empty or null");
         A.ensure(initMeta.offset() >= 0, "File start position cannot be negative");
         A.ensure(initMeta.count() > 0, "Total number of bytes to transfer must be greater than zero");
         A.notNull(stopChecker, "Process stop checker cannot be null");
+        A.ensure(chunkSize > 0, "Size of chunks to transfer data must be positive");
 
         this.stopChecker = stopChecker;
         this.initMeta = initMeta;
         this.log = log.getLogger(AbstractTransmission.class);
+        this.chunkSize = chunkSize;
     }
 
     /**

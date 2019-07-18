@@ -17,11 +17,12 @@
 
 package org.apache.ignite.internal.managers.communication;
 
-import java.io.Serializable;
+import java.io.File;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.util.Map;
 import java.util.UUID;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.internal.util.lang.IgniteThrowableConsumer;
 
 /**
  * Class represents a handler for the set of files considered to be transferred from the remote node. This handler
@@ -38,9 +39,6 @@ import org.apache.ignite.IgniteCheckedException;
  * <em>TransmissionPolicy</em> is used for such purpose. If {@link TransmissionPolicy#FILE} type is received by
  * remote node the <em>FileHandler</em> will be picked up to process this file, the otherwise for the
  * {@link TransmissionPolicy#CHUNK} the <em>ChunkHandler</em> will be picked up.
- *
- * @see FileHandler
- * @see ChunkHandler
  */
 public interface TransmissionHandler {
     /**
@@ -49,34 +47,44 @@ public interface TransmissionHandler {
     public void onBegin(UUID nodeId);
 
     /**
-     * @param err The err of fail handling process.
-     */
-    public void onException(UUID nodeId, Throwable err);
-
-    /**
      * The end of session transmission process.
      */
     public void onEnd(UUID nodeId);
 
     /**
-     * @param nodeId The remote node id receive request for transmission from.
-     * @param name File name transferred from remote.
-     * @param offset Offset pointer of downloaded file in original source.
-     * @param cnt Number of bytes transferred from source started from given offset.
-     * @param params Additional transfer file description params.
-     * @return The instance of read handler to process incoming data by chunks.
+     * @param err The err of fail handling process.
+     */
+    public void onException(UUID nodeId, Throwable err);
+
+    /**
+     * @param nodeId Remote node id from which request has been received.
+     * @param fileMeta File meta info.
+     * @return Absolute pathname denoting a file.
+     */
+    public String filePath(UUID nodeId, TransmissionMeta fileMeta);
+
+    /**
+     * <em>Chunk handler</em> represents by itself the way of input data stream processing.
+     * It accepts within each chunk a {@link ByteBuffer} with data from input for further processing.
+     *
+     * @param nodeId Remote node id from which request has been received.
+     * @param initMeta Initial handler meta info.
+     * @return Instance of chunk handler to process incoming data by chunks.
      * @throws IgniteCheckedException If fails.
      */
-    public ChunkHandler chunkHandler(UUID nodeId, String name, long offset, long cnt, Map<String, Serializable> params)
+    public IgniteThrowableConsumer<ByteBuffer> chunkHandler(UUID nodeId, TransmissionMeta initMeta)
         throws IgniteCheckedException;
 
     /**
-     * @param nodeId The remote node id receive request for transmission from.
-     * @param name File name transferred from remote.
-     * @param params Additional transfer file description params.
-     * @return The intance of read handler to process incoming data like the {@link FileChannel} manner.
+     * <em>File handler</em> represents by itself the way of input data stream processing. All the data will
+     * be processed under the hood using zero-copy transferring algorithm and only start file processing and
+     * the end of processing will be provided.
+     *
+     * @param nodeId Remote node id from which request has been received.
+     * @param initMeta Initial handler meta info.
+     * @return Intance of read handler to process incoming data like the {@link FileChannel} manner.
      * @throws IgniteCheckedException If fails.
      */
-    public FileHandler fileHandler(UUID nodeId, String name, long offset, long cnt, Map<String, Serializable> params)
+    public IgniteThrowableConsumer<File> fileHandler(UUID nodeId, TransmissionMeta initMeta)
         throws IgniteCheckedException;
 }

@@ -17,6 +17,8 @@
 
 package org.apache.ignite.internal.managers.communication;
 
+import java.util.UUID;
+
 /**
  * Class represents ways of data handling for a file ready to be sent though an opened transmission sender session.
  * It is necessary to choose which type of handler will be used and how file should be handled prior to sending file
@@ -27,14 +29,15 @@ package org.apache.ignite.internal.managers.communication;
 public enum TransmissionPolicy {
     /**
      * A file which is considered to be sent though <em>TransmissionSenders</em> session will use
-     * the {@link FileHandler} of {@link TransmissionHandler} to handle transmitted binary data.
+     * the {@link TransmissionHandler#fileHandler(UUID, TransmissionMeta)} of {@link TransmissionHandler}
+     * to handle transmitted binary data.
      */
     FILE,
 
     /**
      * A file which is considered to be sent though <em>TransmissionSenders</em> session will use
-     * the {@link ChunkHandler} of {@link TransmissionHandler} to handle transmitted binary data. This
-     * file will be processed by chunks of handlers defined size.
+     * the {@link TransmissionHandler#chunkHandler(UUID, TransmissionMeta)} of {@link TransmissionHandler}
+     * to handle transmitted binary data. This file will be processed by chunks of handlers defined size.
      */
     CHUNK
 }

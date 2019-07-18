@@ -25,8 +25,8 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteLogger;
+import org.apache.ignite.internal.util.lang.IgniteThrowableConsumer;
 import org.apache.ignite.internal.util.typedef.internal.S;
-import org.apache.ignite.internal.util.typedef.internal.U;
 
 /**
  * Buffered chunked receiver can handle input socket channel by chunks of data and
@@ -34,7 +34,7 @@ import org.apache.ignite.internal.util.typedef.internal.U;
  */
 class ChunkReceiver extends AbstractReceiver {
     /** Chunked channel handler to process data with chunks. */
-    private final ChunkHandler hnd;
+    private final IgniteThrowableConsumer<ByteBuffer> hnd;
 
     /** The destination object to transfer data to\from. */
     private ByteBuffer buf;
@@ -56,17 +56,13 @@ class ChunkReceiver extends AbstractReceiver {
         TransmissionHandler hnd,
         IgniteLogger log
     ) throws IgniteCheckedException {
-        super(initMeta, stopChecker, log);
+        super(initMeta, stopChecker, log, chunkSize);
 
-        assert chunkSize > 0;
         assert initMeta.policy() == TransmissionPolicy.CHUNK : initMeta.policy();
 
-        this.hnd = hnd.chunkHandler(nodeId, name(), offset(), count(), params());
+        this.hnd = hnd.chunkHandler(nodeId, initMeta);
 
         assert this.hnd != null : "ChunkHandler must be provided by transmission handler";
-
-        int buffSize = this.hnd.size();
-        this.chunkSize = buffSize > 0 ? buffSize : chunkSize;;
     }
 
     /** {@inheritDoc} */
@@ -77,25 +73,15 @@ class ChunkReceiver extends AbstractReceiver {
         try {
             super.receive(ch, meta);
         } catch (IgniteCheckedException e) {
-            cleanupResources();
+            cleanup();
 
             throw e;
         }
-
-        // If an IOException occurs, reconnect will happen.
-        if (transferred == count())
-            hnd.close();
     }
 
     /** {@inheritDoc} */
-    @Override public void cleanupResources() {
-        try {
-            hnd.close();
-            buf = null;
-        }
-        catch (IOException e) {
-            U.error(log, "Error closing chunk handler", e);
-        }
+    @Override public void cleanup() {
+        buf = null;
     }
 
     /** {@inheritDoc} */
@@ -149,7 +135,7 @@ class ChunkReceiver extends AbstractReceiver {
 
     /** {@inheritDoc} */
     @Override public void close() throws IOException {
-        buf = null;
+        cleanup();
     }
 
     /** {@inheritDoc} */
