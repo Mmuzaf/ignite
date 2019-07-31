@@ -106,7 +106,7 @@ class FileReceiver extends AbstractReceiver {
         assert meta != null;
         assert fileIo == null;
 
-        assertParameter(!meta.initial() || meta.name().equals(name()), "Read operation stopped. " +
+        assertParameter(meta.name().equals(name()), "Read operation stopped. " +
             "Attempt to receive a new file from channel, while the previous was not fully loaded " +
             "[meta=" + meta + ", prevFile=" + name() + ']');
 

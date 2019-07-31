@@ -48,9 +48,6 @@ class TransmissionMeta implements Externalizable {
     /** Number of bytes to transfer started from given <tt>offset</tt>. */
     private long cnt;
 
-    /** The initial meta info for the file transferred the first time. */
-    private boolean initial;
-
     /** Additional file params to transfer (e.g. partition id, partition name etc.). */
     private HashMap<String, Serializable> map = new HashMap<>();
 
@@ -71,14 +68,13 @@ class TransmissionMeta implements Externalizable {
      * @param err Last seen error if it has been occurred, or {@code null} the otherwise.
      */
     public TransmissionMeta(Exception err) {
-        this("", -1, -1, true, null, null, err);
+        this("", -1, -1, null, null, err);
     }
 
     /**
      * @param name The string name representation to assoticate particular meta with.
      * @param offset The start position of file.
      * @param cnt Number of bytes expected to transfer.
-     * @param initial {@code true} if file is send first time, {@code false} means file meta for the next reconnect attempt.
      * @param params Additional transfer meta params.
      * @param plc Policy of how file will be handled.
      * @param err Last seen error if it has been occurred, or {@code null} the otherwise.
@@ -87,7 +83,6 @@ class TransmissionMeta implements Externalizable {
         String name,
         long offset,
         long cnt,
-        boolean initial,
         Map<String, Serializable> params,
         TransmissionPolicy plc,
         Exception err
@@ -95,7 +90,6 @@ class TransmissionMeta implements Externalizable {
         this.name = name;
         this.offset = offset;
         this.cnt = cnt;
-        this.initial = initial;
 
         if (params != null) {
             for (Map.Entry<String, Serializable> key : params.entrySet())
@@ -127,13 +121,6 @@ class TransmissionMeta implements Externalizable {
      */
     public long count() {
         return cnt;
-    }
-
-    /**
-     * @return {@code true} if the file is transferred the first time.
-     */
-    public boolean initial() {
-        return initial;
     }
 
     /**
@@ -171,7 +158,6 @@ class TransmissionMeta implements Externalizable {
         out.writeUTF(name());
         out.writeLong(offset);
         out.writeLong(cnt);
-        out.writeBoolean(initial);
         out.writeObject(map);
         out.writeObject(plc);
         out.writeObject(err);
@@ -183,7 +169,6 @@ class TransmissionMeta implements Externalizable {
             name = in.readUTF();
             offset = in.readLong();
             cnt = in.readLong();
-            initial = in.readBoolean();
             map = (HashMap)in.readObject();
             plc = (TransmissionPolicy)in.readObject();
             err = (Exception)in.readObject();
@@ -205,13 +190,12 @@ class TransmissionMeta implements Externalizable {
 
         return offset == meta.offset &&
             cnt == meta.cnt &&
-            initial == meta.initial &&
             name.equals(meta.name);
     }
 
     /** {@inheritDoc} */
     @Override public int hashCode() {
-        return Objects.hash(name, offset, cnt, initial);
+        return Objects.hash(name, offset, cnt);
     }
 
     /** {@inheritDoc} */

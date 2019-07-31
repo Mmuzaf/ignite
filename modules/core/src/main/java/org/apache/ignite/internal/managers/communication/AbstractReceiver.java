@@ -91,7 +91,6 @@ abstract class AbstractReceiver extends AbstractTransmission {
         return new TransmissionMeta(name(),
             offset() + transferred,
             count(),
-            transferred == 0,
             params(),
             policy(),
             null);

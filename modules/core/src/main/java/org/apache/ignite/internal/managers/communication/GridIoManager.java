@@ -2831,9 +2831,6 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         TransmissionMeta meta,
         Supplier<Boolean> stopChecker
     ) throws IgniteCheckedException {
-        assertParameter(meta.initial(), "Read operation stopped. Attempt to receive a new file from channel, " +
-            "while the previous was not fully loaded [meta=" + meta + ']');
-
         switch (meta.policy()) {
             case FILE:
                 return new FileReceiver(

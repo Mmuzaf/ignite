@@ -78,7 +78,7 @@ class FileSender extends AbstractTransmission {
         FileIOFactory factory,
         int chunkSize
     ) {
-        super(new TransmissionMeta(file.getName(), pos, cnt, true, params, null, null),
+        super(new TransmissionMeta(file.getName(), pos, cnt, params, null, null),
             stopChecker,
             log,
             chunkSize);
@@ -92,7 +92,7 @@ class FileSender extends AbstractTransmission {
     /**
      * @param ch Output channel to write file to.
      * @param oo Channel to write meta info to.
-     * @param connMeta Coonnection meta received.
+     * @param connMeta Connection meta received.
      * @param plc Policy of how data will be handled on remote node.
      * @throws IOException If a transport exception occurred.
      * @throws IgniteCheckedException If fails.
@@ -119,11 +119,10 @@ class FileSender extends AbstractTransmission {
         // Write to remote about transission `is in active` mode.
         oo.writeBoolean(false);
 
-        // Send meta about curent file to remote.
+        // Send meta about current file to remote.
         new TransmissionMeta(name(),
             offset() + transferred,
             count() - transferred,
-            transferred == 0,
             params(),
             plc,
             null)
@@ -151,7 +150,8 @@ class FileSender extends AbstractTransmission {
         assert connMeta != null;
         assert fileIo != null;
 
-        if (connMeta.initial())
+        // Remote note doesn't have file info.
+        if (connMeta.offset() < 0)
             return;
 
         long uploadedBytes = connMeta.offset() - offset();
