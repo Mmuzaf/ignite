@@ -22,11 +22,9 @@ import java.lang.management.MemoryUsage;
 import java.lang.management.RuntimeMXBean;
 import java.lang.management.ThreadMXBean;
 import java.util.Collection;
-import java.util.concurrent.TimeUnit;
 import org.apache.ignite.cluster.ClusterMetrics;
 import org.apache.ignite.internal.GridKernalContext;
 import org.apache.ignite.internal.processors.cache.GridCacheAdapter;
-import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.GridDhtPartitionsExchangeFuture;
 import org.apache.ignite.internal.processors.jobmetrics.GridJobMetrics;
 import org.apache.ignite.internal.processors.metric.GridMetricManager;
 import org.apache.ignite.internal.processors.metric.MetricRegistry;
@@ -36,9 +34,11 @@ import org.apache.ignite.spi.metric.IntMetric;
 import org.apache.ignite.spi.metric.LongMetric;
 
 import static org.apache.ignite.internal.processors.metric.GridMetricManager.CPU_LOAD;
+import static org.apache.ignite.internal.processors.metric.GridMetricManager.PME_DURATION;
 import static org.apache.ignite.internal.processors.metric.GridMetricManager.DAEMON_THREAD_CNT;
 import static org.apache.ignite.internal.processors.metric.GridMetricManager.GC_CPU_LOAD;
 import static org.apache.ignite.internal.processors.metric.GridMetricManager.PEAK_THREAD_CNT;
+import static org.apache.ignite.internal.processors.metric.GridMetricManager.PME_METRICS;
 import static org.apache.ignite.internal.processors.metric.GridMetricManager.SYS_METRICS;
 import static org.apache.ignite.internal.processors.metric.GridMetricManager.THREAD_CNT;
 import static org.apache.ignite.internal.processors.metric.GridMetricManager.TOTAL_STARTED_THREAD_CNT;
@@ -163,6 +163,9 @@ public class ClusterMetricsImpl implements ClusterMetrics {
      */
     private final IntMetric daemonThreadCnt;
 
+    /** Current PME duration in milliseconds. */
+    private final LongMetric pmeDuration;
+
     /**
      * @param ctx Kernel context.
      * @param nodeStartTime Node start time.
@@ -173,26 +176,30 @@ public class ClusterMetricsImpl implements ClusterMetrics {
 
         MetricRegistry mreg = ctx.metric().registry(SYS_METRICS);
 
-        gcCpuLoad = (DoubleMetric)mreg.findMetric(GC_CPU_LOAD);
-        cpuLoad = (DoubleMetric)mreg.findMetric(CPU_LOAD);
-        upTime = (LongMetric)mreg.findMetric(UP_TIME);
+        gcCpuLoad = mreg.findMetric(GC_CPU_LOAD);
+        cpuLoad = mreg.findMetric(CPU_LOAD);
+        upTime = mreg.findMetric(UP_TIME);
 
-        threadCnt = (IntMetric)mreg.findMetric(THREAD_CNT);
-        peakThreadCnt = (IntMetric)mreg.findMetric(PEAK_THREAD_CNT);
-        totalStartedThreadCnt = (LongMetric)mreg.findMetric(TOTAL_STARTED_THREAD_CNT);
-        daemonThreadCnt = (IntMetric)mreg.findMetric(DAEMON_THREAD_CNT);
+        threadCnt = mreg.findMetric(THREAD_CNT);
+        peakThreadCnt = mreg.findMetric(PEAK_THREAD_CNT);
+        totalStartedThreadCnt = mreg.findMetric(TOTAL_STARTED_THREAD_CNT);
+        daemonThreadCnt = mreg.findMetric(DAEMON_THREAD_CNT);
 
         availableProcessors = ManagementFactory.getOperatingSystemMXBean().getAvailableProcessors();
 
-        heapInit = (LongMetric)mreg.findMetric(metricName("memory", "heap", "init"));
-        heapUsed = (LongMetric)mreg.findMetric(metricName("memory", "heap", "used"));
-        heapCommitted = (LongMetric)mreg.findMetric(metricName("memory", "heap", "committed"));
-        heapMax = (LongMetric)mreg.findMetric(metricName("memory", "heap", "max"));
+        heapInit = mreg.findMetric(metricName("memory", "heap", "init"));
+        heapUsed = mreg.findMetric(metricName("memory", "heap", "used"));
+        heapCommitted = mreg.findMetric(metricName("memory", "heap", "committed"));
+        heapMax = mreg.findMetric(metricName("memory", "heap", "max"));
 
-        nonHeapInit = (LongMetric)mreg.findMetric(metricName("memory", "nonheap", "init"));
-        nonHeapUsed = (LongMetric)mreg.findMetric(metricName("memory", "nonheap", "used"));
-        nonHeapCommitted = (LongMetric)mreg.findMetric(metricName("memory", "nonheap", "committed"));
-        nonHeapMax = (LongMetric)mreg.findMetric(metricName("memory", "nonheap", "max"));
+        nonHeapInit = mreg.findMetric(metricName("memory", "nonheap", "init"));
+        nonHeapUsed = mreg.findMetric(metricName("memory", "nonheap", "used"));
+        nonHeapCommitted = mreg.findMetric(metricName("memory", "nonheap", "committed"));
+        nonHeapMax = mreg.findMetric(metricName("memory", "nonheap", "max"));
+
+        MetricRegistry pmeReg = ctx.metric().registry(PME_METRICS);
+
+        pmeDuration = pmeReg.findMetric(PME_DURATION);
     }
 
     /** {@inheritDoc} */
@@ -491,10 +498,7 @@ public class ClusterMetricsImpl implements ClusterMetrics {
 
     /** {@inheritDoc} */
     @Override public long getCurrentPmeDuration() {
-        GridDhtPartitionsExchangeFuture future = ctx.cache().context().exchange().lastTopologyFuture();
-        
-        return (future == null || future.isDone()) ?
-            0 : TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - future.getStartTime());
+        return pmeDuration.value();
     }
 
     /**
