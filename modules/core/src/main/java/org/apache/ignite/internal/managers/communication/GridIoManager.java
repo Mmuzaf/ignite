@@ -895,7 +895,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                                         "The remote node node left the grid: " + nodeId));
 
                                     ioctx.interrupted = true;
-                                    ioctx.lastRcv.cleanup();
+                                    U.closeQuiet(ioctx.lastRcv);
 
                                     rcvCtxs.remove(sesEntry.getKey());
                                 }
@@ -2636,6 +2636,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
             if (hnd == null) {
                 U.warn(log, "There is no handler for given topic. Opened channel will be closed [nodeId=" + nodeId +
                     ", topic=" + topic + ']');
+
                 return;
             }
 
@@ -2694,10 +2695,10 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 meta.writeExternal(out);
 
                 // Begin method must be called only once.
-                if (!rcvCtx.sesBegin) {
+                if (!rcvCtx.sesStarted) {
                     rcvCtx.hnd.onBegin(nodeId);
 
-                    rcvCtx.sesBegin = true;
+                    rcvCtx.sesStarted = true;
                 }
             }
             catch (Throwable t) {
@@ -2748,17 +2749,19 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 if (stopping)
                     throw new NodeStoppingException("Operation has been cancelled (node is stopping)");
 
-                TransmissionMeta meta = new TransmissionMeta();
+                boolean exit = in.readBoolean();
 
-                meta.readExternal(in);
-
-                if (meta.exit()) {
+                if (exit) {
                     rcvCtx.hnd.onEnd(rcvCtx.nodeId);
 
                     rcvCtxs.remove(topic);
 
                     break;
                 }
+
+                TransmissionMeta meta = new TransmissionMeta();
+
+                meta.readExternal(in);
 
                 if (rcvCtx.lastRcv == null) {
                     rcvCtx.lastRcv = createReceiver(rcvCtx.nodeId,
@@ -2905,7 +2908,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         private final TransmissionHandler hnd;
 
         /** Flag indicates session started. */
-        private boolean sesBegin;
+        private boolean sesStarted;
 
         /** Unique session request id. */
         private IgniteUuid sesId;
@@ -3187,7 +3190,8 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 if (out != null) {
                     U.log(log, "Close file writer session: " + sesKey);
 
-                    TransmissionMeta.CLOSED.writeExternal(out);
+                    // Send transmission close flag.
+                    out.writeBoolean(true);
                 }
             }
             catch (IOException e) {

@@ -92,7 +92,6 @@ abstract class AbstractReceiver extends AbstractTransmission {
             offset() + transferred,
             count(),
             transferred == 0,
-            false,
             params(),
             policy(),
             null);
@@ -104,11 +103,6 @@ abstract class AbstractReceiver extends AbstractTransmission {
     protected TransmissionPolicy policy() {
         return initMeta.policy();
     }
-
-    /**
-     * Release receivers resources.
-     */
-    public abstract void cleanup();
 
     /**
      * @param meta Meta information about receiving file.

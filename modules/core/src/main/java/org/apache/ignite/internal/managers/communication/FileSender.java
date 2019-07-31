@@ -78,7 +78,7 @@ class FileSender extends AbstractTransmission {
         FileIOFactory factory,
         int chunkSize
     ) {
-        super(new TransmissionMeta(file.getName(), pos, cnt, true, false, params, null, null),
+        super(new TransmissionMeta(file.getName(), pos, cnt, true, params, null, null),
             stopChecker,
             log,
             chunkSize);
@@ -116,12 +116,14 @@ class FileSender extends AbstractTransmission {
         if (connMeta != null)
             state(connMeta);
 
+        // Write to remote about transission `is in active` mode.
+        oo.writeBoolean(false);
+
         // Send meta about curent file to remote.
         new TransmissionMeta(name(),
             offset() + transferred,
             count() - transferred,
             transferred == 0,
-            false,
             params(),
             plc,
             null)

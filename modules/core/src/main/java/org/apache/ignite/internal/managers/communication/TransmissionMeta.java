@@ -33,9 +33,6 @@ import org.apache.ignite.internal.util.typedef.internal.S;
  * process or to continue the previous unfinished from the last transmitted point.
  */
 class TransmissionMeta implements Externalizable {
-    /** Default close session instance. The transmit session will be closed if such object received. */
-    public static final TransmissionMeta CLOSED = new TransmissionMeta("", -1, -1, true, true, null, null, null);
-
     /** Serial version uid. */
     private static final long serialVersionUID = 0L;
 
@@ -53,9 +50,6 @@ class TransmissionMeta implements Externalizable {
 
     /** The initial meta info for the file transferred the first time. */
     private boolean initial;
-
-    /** Session close state. If not {@code null} that session must be closed. */
-    private boolean exit;
 
     /** Additional file params to transfer (e.g. partition id, partition name etc.). */
     private HashMap<String, Serializable> map = new HashMap<>();
@@ -77,7 +71,7 @@ class TransmissionMeta implements Externalizable {
      * @param err Last seen error if it has been occurred, or {@code null} the otherwise.
      */
     public TransmissionMeta(Exception err) {
-        this("", -1, -1, true, false, null, null, err);
+        this("", -1, -1, true, null, null, err);
     }
 
     /**
@@ -88,14 +82,12 @@ class TransmissionMeta implements Externalizable {
      * @param params Additional transfer meta params.
      * @param plc Policy of how file will be handled.
      * @param err Last seen error if it has been occurred, or {@code null} the otherwise.
-     * @param exit {@code true} if session must be closed.
      */
     public TransmissionMeta(
         String name,
         long offset,
         long cnt,
         boolean initial,
-        boolean exit,
         Map<String, Serializable> params,
         TransmissionPolicy plc,
         Exception err
@@ -104,7 +96,6 @@ class TransmissionMeta implements Externalizable {
         this.offset = offset;
         this.cnt = cnt;
         this.initial = initial;
-        this.exit = exit;
 
         if (params != null) {
             for (Map.Entry<String, Serializable> key : params.entrySet())
@@ -146,13 +137,6 @@ class TransmissionMeta implements Externalizable {
     }
 
     /**
-     * @return {@code true} if session must be closed.
-     */
-    public boolean exit() {
-        return exit;
-    }
-
-    /**
      * @return The map of additional keys.
      */
     public Map<String, Serializable> params() {
@@ -188,7 +172,6 @@ class TransmissionMeta implements Externalizable {
         out.writeLong(offset);
         out.writeLong(cnt);
         out.writeBoolean(initial);
-        out.writeBoolean(exit);
         out.writeObject(map);
         out.writeObject(plc);
         out.writeObject(err);
@@ -201,7 +184,6 @@ class TransmissionMeta implements Externalizable {
             offset = in.readLong();
             cnt = in.readLong();
             initial = in.readBoolean();
-            exit = in.readBoolean();
             map = (HashMap)in.readObject();
             plc = (TransmissionPolicy)in.readObject();
             err = (Exception)in.readObject();

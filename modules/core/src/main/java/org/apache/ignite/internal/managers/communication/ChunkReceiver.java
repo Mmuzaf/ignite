@@ -66,25 +66,6 @@ class ChunkReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override public void receive(
-        ReadableByteChannel ch,
-        TransmissionMeta meta
-    ) throws IOException, IgniteCheckedException {
-        try {
-            super.receive(ch, meta);
-        } catch (IgniteCheckedException e) {
-            cleanup();
-
-            throw e;
-        }
-    }
-
-    /** {@inheritDoc} */
-    @Override public void cleanup() {
-        buf = null;
-    }
-
-    /** {@inheritDoc} */
     @Override protected void init(TransmissionMeta meta) throws IgniteCheckedException {
         assert meta != null;
         assert buf == null;
@@ -135,7 +116,7 @@ class ChunkReceiver extends AbstractReceiver {
 
     /** {@inheritDoc} */
     @Override public void close() throws IOException {
-        cleanup();
+        buf = null;
     }
 
     /** {@inheritDoc} */

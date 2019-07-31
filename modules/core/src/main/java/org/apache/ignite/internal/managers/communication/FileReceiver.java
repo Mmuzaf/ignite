@@ -102,21 +102,6 @@ class FileReceiver extends AbstractReceiver {
     }
 
     /** {@inheritDoc} */
-    @Override public void cleanup() {
-        if (transferred == count())
-            return;
-
-        try {
-            U.closeQuiet(fileIo);
-
-            Files.delete(file.toPath());
-        }
-        catch (IOException e) {
-            U.error(log, "Error deleting not fully loaded file", e);
-        }
-    }
-
-    /** {@inheritDoc} */
     @Override protected void init(TransmissionMeta meta) throws IgniteCheckedException {
         assert meta != null;
         assert fileIo == null;
@@ -150,6 +135,14 @@ class FileReceiver extends AbstractReceiver {
         U.closeQuiet(fileIo);
 
         fileIo = null;
+
+        try {
+            if (transferred != count())
+                Files.delete(file.toPath());
+        }
+        catch (IOException e) {
+            U.error(log, "Error deleting not fully loaded file: " + file, e);
+        }
     }
 
     /** {@inheritDoc} */
