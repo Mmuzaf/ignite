@@ -21,7 +21,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.zip.CRC32;
 import java.util.zip.CheckedInputStream;
@@ -92,19 +91,15 @@ public final class FastCrc {
      * @throws IOException If fails.
      */
     public static int calcCrc(File file) throws IOException {
-        if (file.isDirectory())
-            throw new IllegalArgumentException("CRC32 can't be calculated over directories");
+        assert !file.isDirectory() : "CRC32 can't be calculated over directories";
 
         CRC32 algo = new CRC32();
 
-        try (InputStream in = new CheckedInputStream(new FileInputStream(file), algo);
-             OutputStream out = new NullOutputStream()) {
-            byte[] buffer = new byte[1024];
+        try (InputStream in = new CheckedInputStream(new FileInputStream(file), algo)) {
+            byte[] buf = new byte[1024];
 
-            int length;
-
-            while ((length = in.read(buffer)) != -1)
-                out.write(buffer, 0, length);
+            while (in.read(buf) != -1)
+                ;
         }
 
         return ~(int)algo.getValue();
@@ -127,15 +122,5 @@ public final class FastCrc {
         buf.limit(initLimit);
 
         return ~(int)crcAlgo.getValue();
-    }
-
-    /**
-     * A stub output stream to calculate file CRC with.
-     */
-    private static class NullOutputStream extends OutputStream {
-        /** {@inheritDoc} */
-        @Override public void write(int b) throws IOException {
-            // No-op
-        }
     }
 }
