@@ -65,7 +65,7 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.function.Supplier;
+import java.util.function.BooleanSupplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.IgniteMessaging;
@@ -2784,7 +2784,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     long downloadTime = U.currentTimeMillis() - startTime;
 
                     U.log(log, "File has been received " +
-                        "[name=" + rcv.name() + ", transferred=" + rcv.transferred() +
+                        "[name=" + rcv.initMeta().name() + ", transferred=" + rcv.transferred() +
                         ", time=" + (double)((downloadTime) / 1000) + " sec" +
                         ", retries=" + rcvCtx.retries + ", remoteId=" + rcvCtx.nodeId + ']');
                 }
@@ -2829,7 +2829,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         UUID nodeId,
         TransmissionHandler hnd,
         TransmissionMeta meta,
-        Supplier<Boolean> stopChecker
+        BooleanSupplier stopChecker
     ) throws IgniteCheckedException {
         switch (meta.policy()) {
             case FILE:
@@ -3153,7 +3153,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                             "will be re-establishing [remoteId=" + remoteId + ", file=" + file.getName() +
                             ", sesKey=" + sesKey + ", retries=" + retries +
                             ", transferred=" + snd.transferred() +
-                            ", total=" + snd.count() + ']', e);
+                            ", total=" + snd.initMeta().count() + ']', e);
 
                         retries++;
 

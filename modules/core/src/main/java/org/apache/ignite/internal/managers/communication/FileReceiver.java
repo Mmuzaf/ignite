@@ -23,7 +23,7 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.file.Files;
 import java.util.UUID;
-import java.util.function.Supplier;
+import java.util.function.BooleanSupplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.internal.processors.cache.persistence.file.FileIO;
@@ -67,7 +67,7 @@ class FileReceiver extends AbstractReceiver {
         UUID nodeId,
         TransmissionMeta initMeta,
         int chunkSize,
-        Supplier<Boolean> stopChecker,
+        BooleanSupplier stopChecker,
         FileIOFactory factory,
         TransmissionHandler hnd,
         IgniteLogger log
@@ -97,7 +97,7 @@ class FileReceiver extends AbstractReceiver {
     ) throws IOException, IgniteCheckedException {
         super.receive(ch, meta);
 
-        if (transferred == count())
+        if (transferred == initMeta.count())
             hnd.accept(file);
     }
 
@@ -106,14 +106,14 @@ class FileReceiver extends AbstractReceiver {
         assert meta != null;
         assert fileIo == null;
 
-        assertParameter(meta.name().equals(name()), "Read operation stopped. " +
+        assertParameter(meta.name().equals(initMeta.name()), "Read operation stopped. " +
             "Attempt to receive a new file from channel, while the previous was not fully loaded " +
-            "[meta=" + meta + ", prevFile=" + name() + ']');
+            "[meta=" + meta + ", prevFile=" + initMeta.name() + ']');
 
         try {
             fileIo = fileIoFactory.create(file);
 
-            fileIo.position(offset() + transferred);
+            fileIo.position(initMeta.offset() + transferred);
         }
         catch (IOException e) {
             throw new IgniteCheckedException("Unable to open destination file. Receiver will will be stopped", e);
@@ -122,9 +122,9 @@ class FileReceiver extends AbstractReceiver {
 
     /** {@inheritDoc} */
     @Override protected void readChunk(ReadableByteChannel ch) throws IOException {
-        long batchSize = Math.min(chunkSize, count() - transferred);
+        long batchSize = Math.min(chunkSize, initMeta.count() - transferred);
 
-        long readed = fileIo.transferFrom(ch, offset() + transferred, batchSize);
+        long readed = fileIo.transferFrom(ch, initMeta.offset() + transferred, batchSize);
 
         if (readed > 0)
             transferred += readed;
@@ -137,7 +137,7 @@ class FileReceiver extends AbstractReceiver {
         fileIo = null;
 
         try {
-            if (transferred != count())
+            if (transferred != initMeta.count())
                 Files.delete(file.toPath());
         }
         catch (IOException e) {

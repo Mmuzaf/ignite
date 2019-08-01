@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
 import java.io.Serializable;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -127,7 +126,7 @@ class TransmissionMeta implements Externalizable {
      * @return The map of additional keys.
      */
     public Map<String, Serializable> params() {
-        return Collections.unmodifiableMap(map);
+        return map;
     }
 
     /**

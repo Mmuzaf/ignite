@@ -19,7 +19,7 @@ package org.apache.ignite.internal.managers.communication;
 
 import java.io.IOException;
 import java.nio.channels.ReadableByteChannel;
-import java.util.function.Supplier;
+import java.util.function.BooleanSupplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteLogger;
 
@@ -38,7 +38,7 @@ abstract class AbstractReceiver extends AbstractTransmission {
      */
     protected AbstractReceiver(
         TransmissionMeta initMeta,
-        Supplier<Boolean> stopChecker,
+        BooleanSupplier stopChecker,
         IgniteLogger log,
         int chunkSize
     ) {
@@ -57,16 +57,16 @@ abstract class AbstractReceiver extends AbstractTransmission {
     ) throws IOException, IgniteCheckedException {
         assert meta != null;
 
-        assertParameter(name().equals(meta.name()), "Attempt to load different file " +
-            "[name=" + name() + ", meta=" + meta + ']');
+        assertParameter(initMeta.name().equals(meta.name()), "Attempt to load different file " +
+            "[initMeta=" + initMeta + ", meta=" + meta + ']');
 
-        assertParameter(offset() + transferred == meta.offset(),
-            "The next chunk offest is incorrect [startPos=" + offset() +
+        assertParameter(initMeta.offset() + transferred == meta.offset(),
+            "The next chunk offest is incorrect [initMeta=" + initMeta +
                 ", transferred=" + transferred + ", meta=" + meta + ']');
 
-        assertParameter(count() == meta.count() + transferred, " The count of bytes to transfer for " +
-            "the next chunk is incorrect [total=" + count() + ", transferred=" + transferred +
-            ", startPos=" + offset() + ", meta=" + meta + ']');
+        assertParameter(initMeta.count() == meta.count() + transferred, " The count of bytes to transfer for " +
+            "the next chunk is incorrect [total=" + initMeta.count() + ", transferred=" + transferred +
+            ", initMeta=" + initMeta + ", meta=" + meta + ']');
 
         init(meta);
 
@@ -80,18 +80,18 @@ abstract class AbstractReceiver extends AbstractTransmission {
             readChunk(ch);
         }
 
-        assert transferred == count() : "The number of transferred bytes are not as expected " +
-            "[expect=" + count() + ", actual=" + transferred + ']';
+        assert transferred == initMeta.count() : "The number of transferred bytes are not as expected " +
+            "[expect=" + initMeta.count() + ", actual=" + transferred + ']';
     }
 
     /**
      * @return Current receiver state written to a {@link TransmissionMeta} instance.
      */
     public TransmissionMeta state() {
-        return new TransmissionMeta(name(),
-            offset() + transferred,
-            count(),
-            params(),
+        return new TransmissionMeta(initMeta.name(),
+            initMeta.offset() + transferred,
+            initMeta.count(),
+            initMeta.params(),
             policy(),
             null);
     }

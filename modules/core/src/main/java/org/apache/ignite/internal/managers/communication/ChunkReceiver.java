@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.ReadableByteChannel;
 import java.util.UUID;
-import java.util.function.Supplier;
+import java.util.function.BooleanSupplier;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.internal.util.lang.IgniteThrowableConsumer;
@@ -52,7 +52,7 @@ class ChunkReceiver extends AbstractReceiver {
         UUID nodeId,
         TransmissionMeta initMeta,
         int chunkSize,
-        Supplier<Boolean> stopChecker,
+        BooleanSupplier stopChecker,
         TransmissionHandler hnd,
         IgniteLogger log
     ) throws IgniteCheckedException {
@@ -90,9 +90,9 @@ class ChunkReceiver extends AbstractReceiver {
 
             // Read will return -1 if remote node close connection.
             if (res < 0) {
-                if (transferred + readed != count()) {
+                if (transferred + readed != initMeta.count()) {
                     throw new IOException("Input data channel reached its end, but file has not fully loaded " +
-                        "[transferred=" + transferred + ", readed=" + readed + ", total=" + count() + ']');
+                        "[transferred=" + transferred + ", readed=" + readed + ", total=" + initMeta.count() + ']');
                 }
 
                 break;

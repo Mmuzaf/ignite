@@ -18,10 +18,8 @@
 package org.apache.ignite.internal.managers.communication;
 
 import java.io.Closeable;
-import java.io.Serializable;
 import java.nio.channels.SocketChannel;
-import java.util.Map;
-import java.util.function.Supplier;
+import java.util.function.BooleanSupplier;
 import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.internal.util.typedef.internal.A;
 import org.apache.ignite.internal.util.typedef.internal.S;
@@ -32,7 +30,7 @@ import org.apache.ignite.internal.util.typedef.internal.S;
  */
 abstract class AbstractTransmission implements Closeable {
     /** Node stopping checker. */
-    private final Supplier<Boolean> stopChecker;
+    private final BooleanSupplier stopChecker;
 
     /** The size of segment for the read. */
     protected final int chunkSize;
@@ -54,7 +52,7 @@ abstract class AbstractTransmission implements Closeable {
      */
     protected AbstractTransmission(
         TransmissionMeta initMeta,
-        Supplier<Boolean> stopChecker,
+        BooleanSupplier stopChecker,
         IgniteLogger log,
         int chunkSize
     ) {
@@ -72,31 +70,10 @@ abstract class AbstractTransmission implements Closeable {
     }
 
     /**
-     * @return String representation file name.
+     * @return Initial transmission meta.
      */
-    public String name() {
-        return initMeta.name();
-    }
-
-    /**
-     * @return Transferred file position offset.
-     */
-    public long offset() {
-        return initMeta.offset();
-    }
-
-    /**
-     * @return Number of bytes to transfer (read from or write to channel).
-     */
-    public long count() {
-        return initMeta.count();
-    }
-
-    /**
-     * @return Map of additional file params.
-     */
-    public Map<String, Serializable> params() {
-        return initMeta.params();
+    public TransmissionMeta initMeta() {
+        return initMeta;
     }
 
     /**
@@ -110,7 +87,7 @@ abstract class AbstractTransmission implements Closeable {
      * @return {@code true} if the transmission process should be interrupted.
      */
     protected boolean stopped() {
-        return stopChecker.get();
+        return stopChecker.getAsBoolean();
     }
 
     /**
