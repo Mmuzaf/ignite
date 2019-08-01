@@ -150,7 +150,7 @@ class TransmissionMeta implements Externalizable {
 
     /** {@inheritDoc} */
     @Override public void writeExternal(ObjectOutput out) throws IOException {
-        out.writeUTF(name());
+        out.writeUTF(name);
         out.writeLong(offset);
         out.writeLong(cnt);
         out.writeObject(params);
