@@ -1487,6 +1487,11 @@ public class GridCacheOffheapManager extends IgniteCacheOffheapManagerImpl imple
         }
 
         /** {@inheritDoc} */
+        @Override public void cacheId(int cacheId) {
+            throw new UnsupportedOperationException();
+        }
+
+        /** {@inheritDoc} */
         @Override public long mvccCoordinatorVersion() {
             return 0; // TODO IGNITE-7384
         }
@@ -2418,6 +2423,19 @@ public class GridCacheOffheapManager extends IgniteCacheOffheapManagerImpl imple
         }
 
         /** {@inheritDoc} */
+        @Override public void removeWithTombstone(
+                GridCacheContext cctx,
+                KeyCacheObject key,
+                GridCacheVersion ver,
+                GridDhtLocalPartition part) throws IgniteCheckedException {
+            assert ctx.database().checkpointLockIsHeldByThread();
+
+            CacheDataStore delegate = init0(false);
+
+            delegate.removeWithTombstone(cctx, key, ver, part);
+        }
+
+        /** {@inheritDoc} */
         @Override public CacheDataRow find(GridCacheContext cctx, KeyCacheObject key) throws IgniteCheckedException {
             CacheDataStore delegate = init0(true);
 
@@ -2451,7 +2469,7 @@ public class GridCacheOffheapManager extends IgniteCacheOffheapManagerImpl imple
 
         /** {@inheritDoc} */
         @Override public GridCursor<CacheDataRow> mvccAllVersionsCursor(GridCacheContext cctx,
-            KeyCacheObject key, Object x) throws IgniteCheckedException {
+            KeyCacheObject key, CacheDataRowAdapter.RowData x) throws IgniteCheckedException {
             CacheDataStore delegate = init0(true);
 
             if (delegate != null)
@@ -2462,17 +2480,17 @@ public class GridCacheOffheapManager extends IgniteCacheOffheapManagerImpl imple
 
 
         /** {@inheritDoc} */
-        @Override public GridCursor<? extends CacheDataRow> cursor() throws IgniteCheckedException {
+        @Override public GridCursor<? extends CacheDataRow> cursor(boolean withTombstones) throws IgniteCheckedException {
             CacheDataStore delegate = init0(true);
 
             if (delegate != null)
-                return delegate.cursor();
+                return delegate.cursor(withTombstones);
 
             return EMPTY_CURSOR;
         }
 
         /** {@inheritDoc} */
-        @Override public GridCursor<? extends CacheDataRow> cursor(Object x) throws IgniteCheckedException {
+        @Override public GridCursor<? extends CacheDataRow> cursor(CacheDataRowAdapter.RowData x) throws IgniteCheckedException {
             CacheDataStore delegate = init0(true);
 
             if (delegate != null)
@@ -2509,7 +2527,7 @@ public class GridCacheOffheapManager extends IgniteCacheOffheapManagerImpl imple
         @Override public GridCursor<? extends CacheDataRow> cursor(int cacheId,
             KeyCacheObject lower,
             KeyCacheObject upper,
-            Object x)
+            CacheDataRowAdapter.RowData x)
             throws IgniteCheckedException {
             CacheDataStore delegate = init0(true);
 
@@ -2523,13 +2541,14 @@ public class GridCacheOffheapManager extends IgniteCacheOffheapManagerImpl imple
         @Override public GridCursor<? extends CacheDataRow> cursor(int cacheId,
             KeyCacheObject lower,
             KeyCacheObject upper,
-            Object x,
-            MvccSnapshot mvccSnapshot)
+            CacheDataRowAdapter.RowData x,
+            MvccSnapshot mvccSnapshot,
+            boolean withTombstones)
             throws IgniteCheckedException {
             CacheDataStore delegate = init0(true);
 
             if (delegate != null)
-                return delegate.cursor(cacheId, lower, upper, x, mvccSnapshot);
+                return delegate.cursor(cacheId, lower, upper, x, mvccSnapshot, withTombstones);
 
             return EMPTY_CURSOR;
         }
@@ -2540,11 +2559,11 @@ public class GridCacheOffheapManager extends IgniteCacheOffheapManagerImpl imple
         }
 
         /** {@inheritDoc} */
-        @Override public GridCursor<? extends CacheDataRow> cursor(int cacheId) throws IgniteCheckedException {
+        @Override public GridCursor<? extends CacheDataRow> cursor(int cacheId, boolean withTombstones) throws IgniteCheckedException {
             CacheDataStore delegate = init0(true);
 
             if (delegate != null)
-                return delegate.cursor(cacheId);
+                return delegate.cursor(cacheId, withTombstones);
 
             return EMPTY_CURSOR;
         }

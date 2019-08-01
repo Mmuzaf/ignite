@@ -34,6 +34,8 @@ import org.apache.ignite.internal.processors.cache.IgniteCacheGetCustomCollectio
 import org.apache.ignite.internal.processors.cache.IgniteCacheLoadRebalanceEvictionSelfTest;
 import org.apache.ignite.internal.processors.cache.distributed.CacheAtomicPrimarySyncBackPressureTest;
 import org.apache.ignite.internal.processors.cache.distributed.CacheOperationsInterruptTest;
+import org.apache.ignite.internal.processors.cache.distributed.CacheRemoveWithTombstonesLoadTest;
+import org.apache.ignite.internal.processors.cache.distributed.CacheRemoveWithTombstonesTest;
 import org.apache.ignite.internal.processors.cache.distributed.FailBackupOnAtomicOperationTest;
 import org.apache.ignite.internal.processors.cache.distributed.IgniteCachePrimarySyncTest;
 import org.apache.ignite.internal.processors.cache.distributed.IgniteTxCachePrimarySyncTest;
@@ -117,6 +119,9 @@ public class IgniteCacheTestSuite9 {
         GridTestUtils.addTestIfNeeded(suite, GridCacheLongRunningTransactionDiagnosticsTest.class, ignoredTests);
 
         GridTestUtils.addTestIfNeeded(suite, FailBackupOnAtomicOperationTest.class, ignoredTests);
+
+        GridTestUtils.addTestIfNeeded(suite, CacheRemoveWithTombstonesTest.class, ignoredTests);
+        GridTestUtils.addTestIfNeeded(suite, CacheRemoveWithTombstonesLoadTest.class, ignoredTests);
 
         return suite;
     }

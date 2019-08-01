@@ -18,7 +18,9 @@
 package org.apache.ignite.internal.processors.cache.persistence;
 
 import java.io.File;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -45,12 +47,17 @@ import org.apache.ignite.internal.mem.DirectMemoryRegion;
 import org.apache.ignite.internal.mem.file.MappedFileMemoryProvider;
 import org.apache.ignite.internal.mem.unsafe.UnsafeMemoryProvider;
 import org.apache.ignite.internal.pagemem.PageMemory;
+import org.apache.ignite.internal.pagemem.PageUtils;
 import org.apache.ignite.internal.pagemem.impl.PageMemoryNoStoreImpl;
 import org.apache.ignite.internal.pagemem.wal.WALPointer;
 import org.apache.ignite.internal.processors.affinity.AffinityTopologyVersion;
 import org.apache.ignite.internal.processors.cache.CacheGroupContext;
+import org.apache.ignite.internal.processors.cache.CacheObject;
+import org.apache.ignite.internal.processors.cache.CacheObjectImpl;
 import org.apache.ignite.internal.processors.cache.GridCacheMapEntry;
 import org.apache.ignite.internal.processors.cache.GridCacheSharedManagerAdapter;
+import org.apache.ignite.internal.processors.cache.IncompleteCacheObject;
+import org.apache.ignite.internal.processors.cache.KeyCacheObject;
 import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.GridDhtPartitionsExchangeFuture;
 import org.apache.ignite.internal.processors.cache.persistence.evict.FairFifoPageEvictionTracker;
 import org.apache.ignite.internal.processors.cache.persistence.evict.NoOpPageEvictionTracker;
@@ -131,6 +138,11 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
     /** First eviction was warned flag. */
     private volatile boolean firstEvictWarn;
 
+    /** */
+    private byte[] tombstoneBytes;
+
+    /** */
+    private CacheObject tombstoneVal;
 
     /** {@inheritDoc} */
     @Override protected void start0() throws IgniteCheckedException {
@@ -146,6 +158,160 @@ public class IgniteCacheDatabaseSharedManager extends GridCacheSharedManagerAdap
         pageSize = memCfg.getPageSize();
 
         initDataRegions(memCfg);
+
+        tombstoneBytes = cctx.marshaller().marshal(null);
+
+        tombstoneVal = new CacheObjectImpl(null, tombstoneBytes);
+    }
+
+    /**
+     * @return Value to be stored for removed entry.
+     */
+    public CacheObject tombstoneValue() {
+        return tombstoneVal;
+    }
+
+    /**
+     * @param row Row.
+     * @return {@code True} if given row is tombstone.
+     * @throws IgniteCheckedException If failed.
+     */
+    public boolean isTombstone(@Nullable CacheDataRow row) throws IgniteCheckedException {
+        if (row == null)
+            return false;
+
+        CacheObject val = row.value();
+
+        assert val != null : row;
+
+        if (val.cacheObjectType() == CacheObject.TYPE_REGULAR) {
+            byte[] bytes = val.valueBytes(null);
+
+            if (Arrays.equals(tombstoneBytes, bytes))
+                return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @param buf Buffer.
+     * @param key Row key.
+     * @param incomplete Incomplete object.
+     * @return Tombstone flag or {@code null} if there is no enough data.
+     */
+    public Boolean isTombstone(ByteBuffer buf,
+        @Nullable KeyCacheObject key,
+        @Nullable IncompleteCacheObject incomplete) {
+        if (key == null) {
+            if (incomplete == null) { // Did not start read key yet.
+                if (buf.remaining() < IncompleteCacheObject.HEAD_LEN) {
+                    return null;
+                }
+
+                int keySize = buf.getInt(buf.position());
+
+                int headOffset = (IncompleteCacheObject.HEAD_LEN + keySize) /* key */ +
+                    8 /* expire time */;
+
+                int requiredSize = headOffset + IncompleteCacheObject.HEAD_LEN; // Value header.
+
+                if (buf.remaining() < requiredSize)
+                    return  null;
+
+                return isTombstone(buf, headOffset);
+            }
+            else { // Reading key, check if there is enogh data to check value header.
+                byte[] data = incomplete.data();
+
+                if (data == null) // Header is not available yet.
+                    return null;
+
+                int keyRemaining = data.length - incomplete.dataOffset();
+
+                assert keyRemaining > 0 : keyRemaining;
+
+                int headOffset = keyRemaining + 8 /* expire time */;
+
+                int requiredSize = headOffset + IncompleteCacheObject.HEAD_LEN; // Value header.
+
+                if (buf.remaining() < requiredSize)
+                    return  null;
+
+                return isTombstone(buf, headOffset);
+            }
+        }
+
+        if (incomplete == null) { // Did not start read value yet.
+            if (buf.remaining() < IncompleteCacheObject.HEAD_LEN)
+                return null;
+
+            return isTombstone(buf, 0);
+        }
+
+        byte[] data = incomplete.data();
+
+        if (data == null) // Header is not available yet.
+            return null;
+
+        if (incomplete.type() != CacheObject.TYPE_REGULAR || data.length != tombstoneBytes.length)
+            return Boolean.FALSE;
+
+        return null;
+     }
+
+    /**
+     * @param buf Buffer.
+     * @param offset Value offset.
+     * @return Tombstone flag or {@code null} if there is no enough data.
+     */
+     private Boolean isTombstone(ByteBuffer buf, int offset) {
+         int valLen = buf.getInt(buf.position() + offset);
+         if (valLen != tombstoneBytes.length)
+             return Boolean.FALSE;
+
+         byte valType = buf.get(buf.position() + offset + 4);
+         if (valType != CacheObject.TYPE_REGULAR)
+             return Boolean.FALSE;
+
+         if (buf.remaining() < (offset + 5 + tombstoneBytes.length))
+             return null;
+
+         for (int i = 0; i < tombstoneBytes.length; i++) {
+             if (tombstoneBytes[i] != buf.get(buf.position() + offset + 5 + i))
+                 return Boolean.FALSE;
+         }
+
+         return Boolean.TRUE;
+     }
+
+    /**
+     * @param addr Row address.
+     * @return {@code True} if stored value is tombstone.
+     */
+    public boolean isTombstone(long addr) {
+        int off = 0;
+
+        byte type = PageUtils.getByte(addr, off + 4);
+
+        if (type != CacheObject.TYPE_REGULAR)
+            return false;
+
+        int len = PageUtils.getInt(addr, off);
+
+        if (len != tombstoneBytes.length)
+            return false;
+
+        off += 5;
+
+        for (int i = 0; i < len; i++) {
+            byte b = PageUtils.getByte(addr, off++);
+
+            if (tombstoneBytes[i] != b)
+                return false;
+        }
+
+        return true;
     }
 
     /**

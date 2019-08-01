@@ -76,6 +76,13 @@ public class IncompleteCacheObject extends IncompleteObject<CacheObject> {
     }
 
     /**
+     * @return Size of already read data.
+     */
+    public int dataOffset() {
+        return off;
+    }
+
+    /**
      * @return Data type.
      */
     public byte type() {
