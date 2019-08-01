@@ -337,8 +337,10 @@ public class GridNioSessionImpl implements GridNioSession {
         this.closeSocket = closeSocket;
     }
 
-    /** {@inheritDoc} */
-    @Override public boolean closed() {
+    /**
+     * @return {@code True} if this session was closed.
+     */
+    public boolean closed() {
         return closeTime.get() != 0;
     }
 

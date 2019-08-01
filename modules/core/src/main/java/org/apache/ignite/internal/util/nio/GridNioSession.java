@@ -71,13 +71,6 @@ public interface GridNioSession {
     public long closeTime();
 
     /**
-     * @return {@code True} if session was closed.
-     */
-    public default boolean closed() {
-        throw new UnsupportedOperationException();
-    }
-
-    /**
      * @return {@code True} to close SocketChannel on current session close occured.
      */
     public default boolean closeSocketOnSessionClose() {
