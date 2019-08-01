@@ -85,11 +85,12 @@ public class ChannelCreateRequest implements Message {
             writer.onHeaderWritten();
         }
 
-        if (writer.state() == 0) {
-            if (!writer.writeMessage("msg", msg))
-                return false;
+        switch (writer.state()) {
+            case 0:
+                if (!writer.writeMessage("msg", msg))
+                    return false;
 
-            writer.incrementState();
+                writer.incrementState();
         }
 
         return true;
@@ -102,13 +103,14 @@ public class ChannelCreateRequest implements Message {
         if (!reader.beforeMessageRead())
             return false;
 
-        if (reader.state() == 0) {
-            msg = reader.readMessage("msg");
+        switch (reader.state()) {
+            case 0:
+                msg = reader.readMessage("msg");
 
-            if (!reader.isLastRead())
-                return false;
+                if (!reader.isLastRead())
+                    return false;
 
-            reader.incrementState();
+                reader.incrementState();
         }
 
         return reader.afterMessageRead(ChannelCreateRequest.class);

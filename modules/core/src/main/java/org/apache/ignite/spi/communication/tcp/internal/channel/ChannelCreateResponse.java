@@ -23,7 +23,6 @@ import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.plugin.extensions.communication.Message;
 import org.apache.ignite.plugin.extensions.communication.MessageReader;
 import org.apache.ignite.plugin.extensions.communication.MessageWriter;
-import org.apache.ignite.spi.communication.tcp.TcpCommunicationSpi;
 
 /**
  * Message response to creation of {@link Channel}.
@@ -35,6 +34,9 @@ public class ChannelCreateResponse implements Message {
     /** Serialization version. */
     private static final long serialVersionUID = 0L;
 
+    /** Ack processing byte (used as message content). */
+    private byte ack;
+
     /** {@inheritDoc} */
     @Override public void onAckReceived() {
         // No-op.
@@ -42,19 +44,44 @@ public class ChannelCreateResponse implements Message {
 
     /** {@inheritDoc} */
     @Override public boolean writeTo(ByteBuffer buf, MessageWriter writer) {
-        if (buf.remaining() < DIRECT_TYPE_SIZE)
-            return false;
+        writer.setBuffer(buf);
 
-        TcpCommunicationSpi.writeMessageType(buf, directType());
+        if (!writer.isHeaderWritten()) {
+            if (!writer.writeHeader(directType(), fieldsCount()))
+                return false;
 
-        buf.put((byte)1);
+            writer.onHeaderWritten();
+        }
+
+        switch (writer.state()) {
+            case 0:
+                if (!writer.writeByte("ack", ack))
+                    return false;
+
+                writer.incrementState();
+        }
 
         return true;
     }
 
     /** {@inheritDoc} */
     @Override public boolean readFrom(ByteBuffer buf, MessageReader reader) {
-        return true;
+        reader.setBuffer(buf);
+
+        if (!reader.beforeMessageRead())
+            return false;
+
+        switch (reader.state()) {
+            case 0:
+                ack = reader.readByte("ack");
+
+                if (!reader.isLastRead())
+                    return false;
+
+                reader.incrementState();
+        }
+
+        return reader.afterMessageRead(ChannelCreateResponse.class);
     }
 
     /** {@inheritDoc} */
@@ -64,7 +91,7 @@ public class ChannelCreateResponse implements Message {
 
     /** {@inheritDoc} */
     @Override public byte fieldsCount() {
-        return 0;
+        return 1;
     }
 
     /** {@inheritDoc} */

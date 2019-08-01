@@ -87,11 +87,12 @@ class SessionChannelMessage implements Message {
             writer.onHeaderWritten();
         }
 
-        if (writer.state() == 0) {
-            if (!writer.writeIgniteUuid("sesId", sesId))
-                return false;
+        switch (writer.state()) {
+            case 0:
+                if (!writer.writeIgniteUuid("sesId", sesId))
+                    return false;
 
-            writer.incrementState();
+                writer.incrementState();
         }
 
         return true;
@@ -104,13 +105,14 @@ class SessionChannelMessage implements Message {
         if (!reader.beforeMessageRead())
             return false;
 
-        if (reader.state() == 0) {
-            sesId = reader.readIgniteUuid("sesId");
+        switch (reader.state()) {
+            case 0:
+                sesId = reader.readIgniteUuid("sesId");
 
-            if (!reader.isLastRead())
-                return false;
+                if (!reader.isLastRead())
+                    return false;
 
-            reader.incrementState();
+                reader.incrementState();
         }
 
         return reader.afterMessageRead(SessionChannelMessage.class);
