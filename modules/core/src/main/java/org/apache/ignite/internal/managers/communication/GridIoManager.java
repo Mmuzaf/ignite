@@ -2662,7 +2662,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                     "another thread. Channel will be closed [initMsg=" + initMsg + ", channel=" + channel +
                     ", fromNodeId=" + nodeId + ']'));
 
-                new TransmissionMeta(ex).writeExternal(out);
+                out.writeObject(new TransmissionMeta(ex));
 
                 return;
             }
@@ -2692,7 +2692,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 TransmissionMeta meta = rcvCtx.lastRcv == null ? new TransmissionMeta(rcvCtx.lastSeenErr) :
                     rcvCtx.lastRcv.state().error(rcvCtx.lastSeenErr);
 
-                meta.writeExternal(out);
+                out.writeObject(meta);
 
                 // Begin method must be called only once.
                 if (!rcvCtx.sesStarted) {
@@ -3051,10 +3051,15 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
             out = new ObjectOutputStream(channel.socket().getOutputStream());
             in = new ObjectInputStream(channel.socket().getInputStream());
 
-            // Synchronize state between remote and local nodes.
-            TransmissionMeta syncMeta = new TransmissionMeta();
+            TransmissionMeta syncMeta;
 
-            syncMeta.readExternal(in);
+            try {
+                // Synchronize state between remote and local nodes.
+                syncMeta = (TransmissionMeta)in.readObject();
+            }
+            catch (ClassNotFoundException e) {
+                throw new IgniteCheckedException(e);
+            }
 
             return syncMeta;
         }
@@ -3129,6 +3134,8 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
 
                         if (out == null && in == null) {
                             connMeta = connect();
+
+                            assert connMeta != null;
 
                             // Stop in case of any error occurred on remote node during file processing.
                             if (connMeta.error() != null)

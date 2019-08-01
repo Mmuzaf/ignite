@@ -163,18 +163,13 @@ class TransmissionMeta implements Externalizable {
     }
 
     /** {@inheritDoc} */
-    @Override public void readExternal(ObjectInput in) throws IOException {
-        try {
-            name = in.readUTF();
-            offset = in.readLong();
-            cnt = in.readLong();
-            map = (HashMap)in.readObject();
-            plc = (TransmissionPolicy)in.readObject();
-            err = (Exception)in.readObject();
-        }
-        catch (ClassNotFoundException e) {
-            throw new IOException("Required class information for deserializing meta not found", e);
-        }
+    @Override public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {
+        name = in.readUTF();
+        offset = in.readLong();
+        cnt = in.readLong();
+        map = (HashMap)in.readObject();
+        plc = (TransmissionPolicy)in.readObject();
+        err = (Exception)in.readObject();
     }
 
     /** {@inheritDoc} */
@@ -189,12 +184,15 @@ class TransmissionMeta implements Externalizable {
 
         return offset == meta.offset &&
             cnt == meta.cnt &&
-            name.equals(meta.name);
+            name.equals(meta.name) &&
+            Objects.equals(map, meta.map) &&
+            plc == meta.plc &&
+            Objects.equals(err, meta.err);
     }
 
     /** {@inheritDoc} */
     @Override public int hashCode() {
-        return Objects.hash(name, offset, cnt);
+        return Objects.hash(name, offset, cnt, map, plc, err);
     }
 
     /** {@inheritDoc} */
