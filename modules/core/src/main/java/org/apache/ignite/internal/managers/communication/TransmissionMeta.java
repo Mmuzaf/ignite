@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
 import java.io.Serializable;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import org.apache.ignite.internal.util.typedef.internal.S;
@@ -48,7 +47,7 @@ class TransmissionMeta implements Externalizable {
     private long cnt;
 
     /** Additional file params to transfer (e.g. partition id, partition name etc.). */
-    private HashMap<String, Serializable> map = new HashMap<>();
+    private Map<String, Serializable> params;
 
     /** Read policy the way of how particular file will be handled. */
     private TransmissionPolicy plc;
@@ -86,15 +85,12 @@ class TransmissionMeta implements Externalizable {
         TransmissionPolicy plc,
         Exception err
     ) {
+        assert params instanceof Serializable || params == null : params.getClass();
+
         this.name = name;
         this.offset = offset;
         this.cnt = cnt;
-
-        if (params != null) {
-            for (Map.Entry<String, Serializable> key : params.entrySet())
-                map.put(key.getKey(), key.getValue());
-        }
-
+        this.params = params;
         this.plc = plc;
         this.err = err;
     }
@@ -126,7 +122,7 @@ class TransmissionMeta implements Externalizable {
      * @return The map of additional keys.
      */
     public Map<String, Serializable> params() {
-        return map;
+        return params;
     }
 
     /**
@@ -157,7 +153,7 @@ class TransmissionMeta implements Externalizable {
         out.writeUTF(name());
         out.writeLong(offset);
         out.writeLong(cnt);
-        out.writeObject(map);
+        out.writeObject(params);
         out.writeObject(plc);
         out.writeObject(err);
     }
@@ -167,7 +163,7 @@ class TransmissionMeta implements Externalizable {
         name = in.readUTF();
         offset = in.readLong();
         cnt = in.readLong();
-        map = (HashMap)in.readObject();
+        params = (Map)in.readObject();
         plc = (TransmissionPolicy)in.readObject();
         err = (Exception)in.readObject();
     }
@@ -185,14 +181,14 @@ class TransmissionMeta implements Externalizable {
         return offset == meta.offset &&
             cnt == meta.cnt &&
             name.equals(meta.name) &&
-            Objects.equals(map, meta.map) &&
+            Objects.equals(params, meta.params) &&
             plc == meta.plc &&
             Objects.equals(err, meta.err);
     }
 
     /** {@inheritDoc} */
     @Override public int hashCode() {
-        return Objects.hash(name, offset, cnt, map, plc, err);
+        return Objects.hash(name, offset, cnt, params, plc, err);
     }
 
     /** {@inheritDoc} */
