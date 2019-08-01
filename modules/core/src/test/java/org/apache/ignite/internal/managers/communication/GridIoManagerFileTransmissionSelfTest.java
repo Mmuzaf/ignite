@@ -191,11 +191,13 @@ public class GridIoManagerFileTransmissionSelfTest extends GridCommonAbstractTes
             .openTransmissionSender(rcv.localNode().id(), topic)) {
             // Iterate over cache partition cacheParts.
             for (File file : cacheParts) {
+                Map<String, Serializable> params = new HashMap<>();
+
+                params.put(file.getName(), file.hashCode());
+
                 sender.send(file,
                     // Put additional params <file_name, file_hashcode> to map.
-                    new HashMap<String, Serializable>() {{
-                        put(file.getName(), file.hashCode());
-                    }},
+                    params,
                     TransmissionPolicy.FILE);
             }
         }
