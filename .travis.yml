@@ -21,7 +21,7 @@ sudo: false
 script: "mvn clean package -DskipTests -Dmaven.javadoc.skip=true -Pall-java,all-scala,scala,lgpl,examples,checkstyle"
 
 jdk:
-  - oraclejdk8
+  - openjdk11
 
 cache:
   directories:
