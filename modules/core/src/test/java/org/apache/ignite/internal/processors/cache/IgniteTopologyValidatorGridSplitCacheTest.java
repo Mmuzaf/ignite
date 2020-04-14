@@ -42,6 +42,9 @@ import org.apache.ignite.resources.IgniteInstanceResource;
 import org.apache.ignite.resources.LoggerResource;
 import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
 import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
+import org.apache.ignite.testframework.MvccFeatureChecker;
+import org.junit.Assume;
+import org.junit.Test;
 
 import static org.apache.ignite.cache.CacheMode.PARTITIONED;
 import static org.apache.ignite.cache.CacheWriteSynchronizationMode.PRIMARY_SYNC;
@@ -150,8 +153,6 @@ public class IgniteTopologyValidatorGridSplitCacheTest extends IgniteCacheTopolo
 
         if (idx != CONFIGLESS_GRID_IDX) {
             if (idx == RESOLVER_GRID_IDX) {
-                cfg.setClientMode(true);
-
                 userAttrs.put(ACTIVATOR_NODE_ATTR, "true");
             }
             else
@@ -197,6 +198,8 @@ public class IgniteTopologyValidatorGridSplitCacheTest extends IgniteCacheTopolo
 
     /** {@inheritDoc} */
     @Override protected void beforeTest() throws Exception {
+        Assume.assumeFalse("https://issues.apache.org/jira/browse/IGNITE-7952", MvccFeatureChecker.forcedMvcc());
+
         super.beforeTest();
 
         startGridsMultiThreaded(GRID_CNT);
@@ -220,6 +223,7 @@ public class IgniteTopologyValidatorGridSplitCacheTest extends IgniteCacheTopolo
      *
      * @throws Exception If failed.
      */
+    @Test
     public void testTopologyValidator() throws Exception {
         testTopologyValidator0(false);
     }
@@ -229,6 +233,7 @@ public class IgniteTopologyValidatorGridSplitCacheTest extends IgniteCacheTopolo
      *
      * @throws Exception If failed.
      */
+    @Test
     public void testTopologyValidatorWithCacheGroup() throws Exception {
         testTopologyValidator0(true);
     }
@@ -370,7 +375,7 @@ public class IgniteTopologyValidatorGridSplitCacheTest extends IgniteCacheTopolo
      * @throws Exception If failed.
      */
     private void resolveSplit() throws Exception {
-        startGrid(RESOLVER_GRID_IDX);
+        startClientGrid(RESOLVER_GRID_IDX);
 
         stopGrid(RESOLVER_GRID_IDX);
     }
@@ -382,7 +387,7 @@ public class IgniteTopologyValidatorGridSplitCacheTest extends IgniteCacheTopolo
      * @throws Exception If failed.
      */
     private void resolveSplitWithRace(int srvNode) throws Exception {
-        startGrid(RESOLVER_GRID_IDX);
+        startClientGrid(RESOLVER_GRID_IDX);
 
         startGrid(srvNode);
 

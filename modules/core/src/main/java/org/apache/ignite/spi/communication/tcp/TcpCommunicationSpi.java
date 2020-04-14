@@ -23,24 +23,25 @@ import java.io.OutputStream;
 import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.SocketAddress;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.channels.Channel;
 import java.nio.channels.SelectableChannel;
 import java.nio.channels.SocketChannel;
-import java.nio.channels.spi.AbstractInterruptibleChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -49,6 +50,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 import org.apache.ignite.Ignite;
@@ -66,13 +68,16 @@ import org.apache.ignite.failure.FailureContext;
 import org.apache.ignite.failure.FailureType;
 import org.apache.ignite.internal.IgniteClientDisconnectedCheckedException;
 import org.apache.ignite.internal.IgniteEx;
+import org.apache.ignite.internal.IgniteFeatures;
 import org.apache.ignite.internal.IgniteInternalFuture;
 import org.apache.ignite.internal.IgniteInterruptedCheckedException;
 import org.apache.ignite.internal.IgniteKernal;
+import org.apache.ignite.internal.IgniteTooManyOpenFilesException;
 import org.apache.ignite.internal.cluster.ClusterTopologyCheckedException;
 import org.apache.ignite.internal.managers.discovery.IgniteDiscoverySpi;
 import org.apache.ignite.internal.managers.eventstorage.GridLocalEventListener;
 import org.apache.ignite.internal.managers.eventstorage.HighPriorityListener;
+import org.apache.ignite.internal.processors.metric.impl.MetricUtils;
 import org.apache.ignite.internal.util.GridConcurrentFactory;
 import org.apache.ignite.internal.util.GridSpinReadWriteLock;
 import org.apache.ignite.internal.util.future.GridFinishedFuture;
@@ -97,6 +102,7 @@ import org.apache.ignite.internal.util.nio.GridNioServerListener;
 import org.apache.ignite.internal.util.nio.GridNioServerListenerAdapter;
 import org.apache.ignite.internal.util.nio.GridNioSession;
 import org.apache.ignite.internal.util.nio.GridNioSessionMetaKey;
+import org.apache.ignite.internal.util.nio.GridSelectorNioSessionImpl;
 import org.apache.ignite.internal.util.nio.GridShmemCommunicationClient;
 import org.apache.ignite.internal.util.nio.GridTcpNioCommunicationClient;
 import org.apache.ignite.internal.util.nio.ssl.BlockingSslHandler;
@@ -106,11 +112,11 @@ import org.apache.ignite.internal.util.typedef.CI1;
 import org.apache.ignite.internal.util.typedef.CI2;
 import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.internal.util.typedef.X;
-import org.apache.ignite.internal.util.typedef.internal.CU;
 import org.apache.ignite.internal.util.typedef.internal.LT;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.internal.util.worker.GridWorker;
+import org.apache.ignite.internal.worker.WorkersRegistry;
 import org.apache.ignite.lang.IgniteBiInClosure;
 import org.apache.ignite.lang.IgniteBiTuple;
 import org.apache.ignite.lang.IgniteFuture;
@@ -126,6 +132,7 @@ import org.apache.ignite.plugin.extensions.communication.MessageReader;
 import org.apache.ignite.plugin.extensions.communication.MessageWriter;
 import org.apache.ignite.resources.IgniteInstanceResource;
 import org.apache.ignite.resources.LoggerResource;
+import org.apache.ignite.spi.ExponentialBackoffTimeoutStrategy;
 import org.apache.ignite.spi.IgnitePortProtocol;
 import org.apache.ignite.spi.IgniteSpiAdapter;
 import org.apache.ignite.spi.IgniteSpiConfiguration;
@@ -138,13 +145,17 @@ import org.apache.ignite.spi.IgniteSpiOperationTimeoutException;
 import org.apache.ignite.spi.IgniteSpiOperationTimeoutHelper;
 import org.apache.ignite.spi.IgniteSpiThread;
 import org.apache.ignite.spi.IgniteSpiTimeoutObject;
+import org.apache.ignite.spi.TimeoutStrategy;
 import org.apache.ignite.spi.communication.CommunicationListener;
 import org.apache.ignite.spi.communication.CommunicationSpi;
+import org.apache.ignite.spi.communication.tcp.internal.CommunicationListenerEx;
 import org.apache.ignite.spi.communication.tcp.internal.ConnectionKey;
+import org.apache.ignite.spi.communication.tcp.internal.HandshakeException;
 import org.apache.ignite.spi.communication.tcp.internal.TcpCommunicationConnectionCheckFuture;
 import org.apache.ignite.spi.communication.tcp.internal.TcpCommunicationNodeConnectionCheckFuture;
 import org.apache.ignite.spi.communication.tcp.messages.HandshakeMessage;
 import org.apache.ignite.spi.communication.tcp.messages.HandshakeMessage2;
+import org.apache.ignite.spi.communication.tcp.messages.HandshakeWaitMessage;
 import org.apache.ignite.spi.communication.tcp.messages.NodeIdMessage;
 import org.apache.ignite.spi.communication.tcp.messages.RecoveryLastReceivedMessage;
 import org.apache.ignite.spi.discovery.DiscoverySpi;
@@ -152,15 +163,20 @@ import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
 import org.apache.ignite.thread.IgniteThread;
 import org.jetbrains.annotations.Nullable;
 
+import static java.util.Objects.nonNull;
 import static org.apache.ignite.events.EventType.EVT_NODE_FAILED;
 import static org.apache.ignite.events.EventType.EVT_NODE_LEFT;
 import static org.apache.ignite.failure.FailureType.CRITICAL_ERROR;
 import static org.apache.ignite.failure.FailureType.SYSTEM_WORKER_TERMINATION;
+import static org.apache.ignite.internal.IgniteFeatures.CHANNEL_COMMUNICATION;
+import static org.apache.ignite.internal.IgniteFeatures.nodeSupports;
 import static org.apache.ignite.internal.util.nio.GridNioSessionMetaKey.SSL_META;
+import static org.apache.ignite.plugin.extensions.communication.Message.DIRECT_TYPE_SIZE;
 import static org.apache.ignite.spi.communication.tcp.internal.TcpCommunicationConnectionCheckFuture.SES_FUT_META;
 import static org.apache.ignite.spi.communication.tcp.messages.RecoveryLastReceivedMessage.ALREADY_CONNECTED;
 import static org.apache.ignite.spi.communication.tcp.messages.RecoveryLastReceivedMessage.NEED_WAIT;
 import static org.apache.ignite.spi.communication.tcp.messages.RecoveryLastReceivedMessage.NODE_STOPPING;
+import static org.apache.ignite.spi.communication.tcp.messages.RecoveryLastReceivedMessage.UNKNOWN_NODE;
 
 /**
  * <tt>TcpCommunicationSpi</tt> is default communication SPI which uses
@@ -204,16 +220,22 @@ import static org.apache.ignite.spi.communication.tcp.messages.RecoveryLastRecei
  * <h2 class="header">Optional</h2>
  * The following configuration parameters are optional:
  * <ul>
+ * <li>Address resolver (see {@link #setAddressResolver(AddressResolver)}</li>
  * <li>Node local IP address (see {@link #setLocalAddress(String)})</li>
  * <li>Node local port number (see {@link #setLocalPort(int)})</li>
  * <li>Local port range (see {@link #setLocalPortRange(int)}</li>
+ * <li>Use paired connections (see {@link #setUsePairedConnections(boolean)}</li>
  * <li>Connections per node (see {@link #setConnectionsPerNode(int)})</li>
+ * <li>Shared memory port (see {@link #setSharedMemoryPort(int)}</li>
  * <li>Idle connection timeout (see {@link #setIdleConnectionTimeout(long)})</li>
  * <li>Direct or heap buffer allocation (see {@link #setDirectBuffer(boolean)})</li>
  * <li>Direct or heap buffer allocation for sending (see {@link #setDirectSendBuffer(boolean)})</li>
  * <li>Count of selectors and selector threads for NIO server (see {@link #setSelectorsCount(int)})</li>
+ * <li>Selector thread busy-loop iterations (see {@link #setSelectorSpins(long)}</li>
  * <li>{@code TCP_NODELAY} socket option for sockets (see {@link #setTcpNoDelay(boolean)})</li>
+ * <li>Filter reachable addresses (see {@link #setFilterReachableAddresses(boolean)} </li>
  * <li>Message queue limit (see {@link #setMessageQueueLimit(int)})</li>
+ * <li>Slow client queue limit (see {@link #setSlowClientQueueLimit(int)})</li>
  * <li>Connect timeout (see {@link #setConnectTimeout(long)})</li>
  * <li>Maximum connect timeout (see {@link #setMaxConnectTimeout(long)})</li>
  * <li>Reconnect attempts count (see {@link #setReconnectCount(int)})</li>
@@ -263,6 +285,9 @@ import static org.apache.ignite.spi.communication.tcp.messages.RecoveryLastRecei
 @IgniteSpiMultipleInstancesSupport(true)
 @IgniteSpiConsistencyChecked(optional = false)
 public class TcpCommunicationSpi extends IgniteSpiAdapter implements CommunicationSpi<Message> {
+    /** Time threshold to log too long connection establish. */
+    private static final int CONNECTION_ESTABLISH_THRESHOLD_MS = 100;
+
     /** IPC error message. */
     public static final String OUT_OF_RESOURCES_TCP_MSG = "Failed to allocate shared memory segment " +
         "(switching to TCP, may be slower).";
@@ -315,6 +340,15 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
      */
     public static final int DFLT_SELECTORS_CNT = Math.max(4, Runtime.getRuntime().availableProcessors() / 2);
 
+    /** Default initial connect/handshake timeout in case of failure detection enabled. */
+    private static final int DFLT_INITIAL_TIMEOUT = 500;
+
+    /** Default initial delay in case of target node is still out of topology. */
+    private static final int DFLT_NEED_WAIT_DELAY = 200;
+
+    /** Default delay between reconnects attempts in case of temporary network issues. */
+    private static final int DFLT_RECONNECT_DELAY = 50;
+
     /**
      * Version when client is ready to wait to connect to server (could be needed when client tries to open connection
      * before it starts being visible for server)
@@ -324,8 +358,14 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     /** Connection index meta for session. */
     public static final int CONN_IDX_META = GridNioSessionMetaKey.nextUniqueKey();
 
+    /** Node consistent id meta for session. */
+    public static final int CONSISTENT_ID_META = GridNioSessionMetaKey.nextUniqueKey();
+
     /** Message tracker meta for session. */
     private static final int TRACKER_META = GridNioSessionMetaKey.nextUniqueKey();
+
+    /** Channel meta used for establishing channel connections. */
+    private static final int CHANNEL_FUT_META = GridNioSessionMetaKey.nextUniqueKey();
 
     /**
      * Default local port range (value is <tt>100</tt>).
@@ -348,12 +388,11 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     /** Default connections per node. */
     public static final int DFLT_CONN_PER_NODE = 1;
 
+    /** Maximum {@link GridNioSession} connections per node. */
+    public static final int MAX_CONN_PER_NODE = 1024;
+
     /** No-op runnable. */
-    private static final IgniteRunnable NOOP = new IgniteRunnable() {
-        @Override public void run() {
-            // No-op.
-        }
-    };
+    private static final IgniteRunnable NOOP = () -> {};
 
     /** Node ID message type. */
     public static final short NODE_ID_MSG_TYPE = -1;
@@ -364,11 +403,60 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     /** Handshake message type. */
     public static final short HANDSHAKE_MSG_TYPE = -3;
 
+    /** Handshake wait message type. */
+    public static final short HANDSHAKE_WAIT_MSG_TYPE = -28;
+
+    /** Communication metrics group name. */
+    public static final String COMMUNICATION_METRICS_GROUP_NAME = MetricUtils.metricName("communication", "tcp");
+
+    /** */
+    public static final String SENT_MESSAGES_METRIC_NAME = "sentMessagesCount";
+
+    /** */
+    public static final String SENT_MESSAGES_METRIC_DESC = "Total number of messages sent by current node";
+
+    /** */
+    public static final String RECEIVED_MESSAGES_METRIC_NAME = "receivedMessagesCount";
+
+    /** */
+    public static final String RECEIVED_MESSAGES_METRIC_DESC = "Total number of messages received by current node";
+
+    /** */
+    public static final String SENT_MESSAGES_BY_TYPE_METRIC_NAME = "sentMessagesByType";
+
+    /** */
+    public static final String SENT_MESSAGES_BY_TYPE_METRIC_DESC =
+        "Total number of messages with given type sent by current node";
+
+    /** */
+    public static final String RECEIVED_MESSAGES_BY_TYPE_METRIC_NAME = "receivedMessagesByType";
+
+    /** */
+    public static final String RECEIVED_MESSAGES_BY_TYPE_METRIC_DESC =
+        "Total number of messages with given type received by current node";
+
+    /** */
+    public static final String SENT_MESSAGES_BY_NODE_CONSISTENT_ID_METRIC_NAME = "sentMessagesToNode";
+
+    /** */
+    public static final String SENT_MESSAGES_BY_NODE_CONSISTENT_ID_METRIC_DESC =
+        "Total number of messages sent by current node to the given node";
+
+    /** */
+    public static final String RECEIVED_MESSAGES_BY_NODE_CONSISTENT_ID_METRIC_NAME = "receivedMessagesFromNode";
+
+    /** */
+    public static final String RECEIVED_MESSAGES_BY_NODE_CONSISTENT_ID_METRIC_DESC =
+        "Total number of messages received by current node from the given node";
+
     /** */
     private ConnectGateway connectGate;
 
     /** */
-    private ConnectionPolicy connPlc;
+    private ConnectionPolicy connPlc = new FirstConnectionPolicy();
+
+    /** Channel connection index provider. */
+    private ConnectionPolicy chConnPlc;
 
     /** */
     private boolean enableForcibleNodeKill = IgniteSystemProperties
@@ -382,7 +470,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     private final GridNioServerListener<Message> srvLsnr =
         new GridNioServerListenerAdapter<Message>() {
             @Override public void onSessionWriteTimeout(GridNioSession ses) {
-                LT.warn(log,"Communication SPI session write timed out (consider increasing " +
+                LT.warn(log, "Communication SPI session write timed out (consider increasing " +
                     "'socketWriteTimeout' " + "configuration property) [remoteAddr=" + ses.remoteAddress() +
                     ", writeTimeout=" + sockWriteTimeout + ']');
 
@@ -399,11 +487,21 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                         log.info("Accepted incoming communication connection [locAddr=" + ses.localAddress() +
                             ", rmtAddr=" + ses.remoteAddress() + ']');
 
-                    if (log.isDebugEnabled())
-                        log.debug("Sending local node ID to newly accepted session: " + ses);
-
                     try {
-                        ses.sendNoFuture(nodeIdMessage(), null);
+                        boolean client = Boolean.TRUE.equals(ignite().configuration().isClientMode());
+
+                        if (client || ctxInitLatch.getCount() == 0 || !isHandshakeWaitSupported()) {
+                            if (log.isDebugEnabled())
+                                log.debug("Sending local node ID to newly accepted session: " + ses);
+
+                            ses.sendNoFuture(nodeIdMessage(), null);
+                        }
+                        else {
+                            if (log.isDebugEnabled())
+                                log.debug("Sending handshake wait message to newly accepted session: " + ses);
+
+                            ses.sendNoFuture(new HandshakeWaitMessage(), null);
+                        }
                     }
                     catch (IgniteCheckedException e) {
                         U.error(log, "Failed to send message: " + e, e);
@@ -499,7 +597,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                     boolean unknownNode = true;
 
                     if (discoverySpi instanceof TcpDiscoverySpi) {
-                        TcpDiscoverySpi tcpDiscoverySpi = (TcpDiscoverySpi) discoverySpi;
+                        TcpDiscoverySpi tcpDiscoverySpi = (TcpDiscoverySpi)discoverySpi;
 
                         ClusterNode node0 = tcpDiscoverySpi.getNode0(sndId);
 
@@ -511,12 +609,16 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                         }
                     }
                     else if (discoverySpi instanceof IgniteDiscoverySpi)
-                        unknownNode = !((IgniteDiscoverySpi) discoverySpi).knownNode(sndId);
+                        unknownNode = !((IgniteDiscoverySpi)discoverySpi).knownNode(sndId);
 
                     if (unknownNode) {
                         U.warn(log, "Close incoming connection, unknown node [nodeId=" + sndId + ", ses=" + ses + ']');
 
-                        ses.close();
+                        ses.send(new RecoveryLastReceivedMessage(UNKNOWN_NODE)).listen(new CI1<IgniteInternalFuture<?>>() {
+                            @Override public void apply(IgniteInternalFuture<?> fut) {
+                                ses.close();
+                            }
+                        });
                     }
                     else {
                         ses.send(new RecoveryLastReceivedMessage(NEED_WAIT)).listen(new CI1<IgniteInternalFuture<?>>() {
@@ -528,6 +630,8 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
 
                     return;
                 }
+
+                ses.addMeta(CONSISTENT_ID_META, rmtNode.consistentId());
 
                 final ConnectionKey old = ses.addMeta(CONN_IDX_META, connKey);
 
@@ -546,7 +650,9 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                     log.debug("Received handshake message [locNodeId=" + locNode.id() + ", rmtNodeId=" + sndId +
                         ", msg=" + msg0 + ']');
 
-                if (usePairedConnections(rmtNode)) {
+                if (isChannelConnIdx(msg0.connectionIndex()))
+                    ses.send(new RecoveryLastReceivedMessage(0));
+                else if (usePairedConnections(rmtNode)) {
                     final GridNioRecoveryDescriptor recoveryDesc = inRecoveryDescriptor(rmtNode, connKey);
 
                     ConnectClosureNew c = new ConnectClosureNew(ses, recoveryDesc, rmtNode);
@@ -636,7 +742,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
 
                         if (log.isDebugEnabled())
                             log.debug("Received incoming connection from remote node " +
-                            "[rmtNode=" + rmtNode.id() + ", reserved=" + reserved +
+                                "[rmtNode=" + rmtNode.id() + ", reserved=" + reserved +
                                 ", recovery=" + recoveryDesc + ']');
 
                         if (reserved) {
@@ -655,9 +761,9 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                         if (oldFut instanceof ConnectFuture && locNode.order() < rmtNode.order()) {
                             if (log.isInfoEnabled()) {
                                 log.info("Received incoming connection from remote node while " +
-                                "connecting to this node, rejecting [locNode=" + locNode.id() +
-                                ", locNodeOrder=" + locNode.order() + ", rmtNode=" + rmtNode.id() +
-                                ", rmtNodeOrder=" + rmtNode.order() + ']');
+                                    "connecting to this node, rejecting [locNode=" + locNode.id() +
+                                    ", locNodeOrder=" + locNode.order() + ", rmtNode=" + rmtNode.id() +
+                                    ", rmtNodeOrder=" + rmtNode.order() + ']');
                             }
 
                             ses.send(new RecoveryLastReceivedMessage(ALREADY_CONNECTED));
@@ -690,13 +796,48 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
             }
 
             @Override public void onMessageSent(GridNioSession ses, Message msg) {
-                ConnectionKey connKey = ses.meta(CONN_IDX_META);
+                Object consistentId = ses.meta(CONSISTENT_ID_META);
 
-                if (connKey != null) {
-                    UUID nodeId = connKey.nodeId();
+                if (consistentId != null)
+                    metricsLsnr.onMessageSent(msg, consistentId);
+            }
 
-                    metricsLsnr.onMessageSent(msg, nodeId);
-                }
+            private void onChannelCreate(
+                GridSelectorNioSessionImpl ses,
+                ConnectionKey connKey,
+                Message msg
+            ) {
+                cleanupLocalNodeRecoveryDescriptor(connKey);
+
+                ses.send(msg)
+                    .listen(sendFut -> {
+                        if (sendFut.error() != null) {
+                            U.error(log, "Fail to send channel creation response to the remote node. " +
+                                "Session will be closed [nodeId=" + connKey.nodeId() +
+                                ", idx=" + connKey.connectionIndex() + ']', sendFut.error());
+
+                            ses.close();
+
+                            return;
+                        }
+
+                        ses.closeSocketOnSessionClose(false);
+
+                        // Close session and send response.
+                        ses.close().listen(closeFut -> {
+                            if (closeFut.error() != null) {
+                                U.error(log, "Nio session has not been properly closed " +
+                                        "[nodeId=" + connKey.nodeId() + ", idx=" + connKey.connectionIndex() + ']',
+                                    closeFut.error());
+
+                                U.closeQuiet(ses.key().channel());
+
+                                return;
+                            }
+
+                            notifyChannelEvtListener(connKey.nodeId(), ses.key().channel(), msg);
+                        });
+                    });
             }
 
             @Override public void onMessage(final GridNioSession ses, Message msg) {
@@ -726,8 +867,35 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                     }
                 }
                 else {
+                    Object consistentId = ses.meta(CONSISTENT_ID_META);
+
+                    assert consistentId != null;
+
+                    if (isChannelConnIdx(connKey.connectionIndex())) {
+                        if (ses.meta(CHANNEL_FUT_META) == null)
+                            onChannelCreate((GridSelectorNioSessionImpl)ses, connKey, msg);
+                        else {
+                            GridFutureAdapter<Channel> fut = ses.meta(CHANNEL_FUT_META);
+                            GridSelectorNioSessionImpl ses0 = (GridSelectorNioSessionImpl)ses;
+
+                            ses0.closeSocketOnSessionClose(false);
+
+                            ses0.close().listen(f -> {
+                                if (f.error() != null) {
+                                    fut.onDone(f.error());
+
+                                    return;
+                                }
+
+                                fut.onDone(ses0.key().channel());
+                            });
+                        }
+
+                        return;
+                    }
+
                     if (msg instanceof RecoveryLastReceivedMessage) {
-                        metricsLsnr.onMessageReceived(msg, connKey.nodeId());
+                        metricsLsnr.onMessageReceived(msg, consistentId);
 
                         GridNioRecoveryDescriptor recovery = ses.outRecoveryDescriptor();
 
@@ -778,7 +946,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                         }
                     }
 
-                    metricsLsnr.onMessageReceived(msg, connKey.nodeId());
+                    metricsLsnr.onMessageReceived(msg, consistentId);
 
                     IgniteRunnable c;
 
@@ -805,7 +973,8 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
 
             /** {@inheritDoc} */
             @Override public void onFailure(FailureType failureType, Throwable failure) {
-                ((IgniteEx)ignite).context().failure().process(new FailureContext(failureType, failure));
+                if (ignite instanceof IgniteEx)
+                    ((IgniteEx)ignite).context().failure().process(new FailureContext(failureType, failure));
             }
 
             /**
@@ -927,7 +1096,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                                     catch (IgniteCheckedException e) {
                                         if (log.isDebugEnabled())
                                             log.debug("Failed to send recovery handshake " +
-                                                    "[rmtNode=" + rmtNode.id() + ", err=" + e + ']');
+                                                "[rmtNode=" + rmtNode.id() + ", err=" + e + ']');
 
                                         recoveryDesc.release();
                                     }
@@ -1009,14 +1178,14 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                                         msgFut.get();
 
                                         GridTcpNioCommunicationClient client =
-                                                connected(recoveryDesc, ses, rmtNode, msg.received(), false, createClient);
+                                            connected(recoveryDesc, ses, rmtNode, msg.received(), false, createClient);
 
                                         fut.onDone(client);
                                     }
                                     catch (IgniteCheckedException e) {
                                         if (log.isDebugEnabled())
                                             log.debug("Failed to send recovery handshake " +
-                                                    "[rmtNode=" + rmtNode.id() + ", err=" + e + ']');
+                                                "[rmtNode=" + rmtNode.id() + ", err=" + e + ']');
 
                                         recoveryDesc.release();
 
@@ -1085,7 +1254,6 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     private long maxConnTimeout = DFLT_MAX_CONN_TIMEOUT;
 
     /** Reconnect attempts count. */
-    @SuppressWarnings({"FieldAccessedSynchronizedAndUnsynchronized"})
     private int reconCnt = DFLT_RECONNECT_CNT;
 
     /** Socket send buffer. */
@@ -1168,7 +1336,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     private volatile boolean stopping;
 
     /** Statistics. */
-    private final TcpCommunicationMetricsListener metricsLsnr = new TcpCommunicationMetricsListener();
+    private TcpCommunicationMetricsListener metricsLsnr;
 
     /** Client connect futures. */
     private final ConcurrentMap<ConnectionKey, GridFutureAdapter<GridCommunicationClient>> clientFuts =
@@ -1206,6 +1374,15 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
             this.addrRslvr = addrRslvr;
 
         return this;
+    }
+
+    /**
+     * See {@link #setAddressResolver(AddressResolver)}.
+     *
+     * @return Address resolver.
+     */
+    public AddressResolver getAddressResolver() {
+        return addrRslvr;
     }
 
     /**
@@ -1329,9 +1506,10 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
      * Default is {@code false}.
      *
      * @param usePairedConnections {@code true} to use paired connections and {@code false} otherwise.
-     * @see #getConnectionsPerNode()
      * @return {@code this} for chaining.
+     * @see #getConnectionsPerNode()
      */
+    @IgniteSpiConfiguration(optional = true)
     public TcpCommunicationSpi setUsePairedConnections(boolean usePairedConnections) {
         this.usePairedConnections = usePairedConnections;
 
@@ -1344,9 +1522,10 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
      * half for outgoing messages.
      *
      * @param maxConnectionsPerNode Number of connections per node.
-     * @see #isUsePairedConnections()
      * @return {@code this} for chaining.
+     * @see #isUsePairedConnections()
      */
+    @IgniteSpiConfiguration(optional = true)
     public TcpCommunicationSpi setConnectionsPerNode(int maxConnectionsPerNode) {
         this.connectionsPerNode = maxConnectionsPerNode;
 
@@ -1356,7 +1535,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     /**
      * See {@link #setConnectionsPerNode(int)}.
      *
-     *  @return Number of connections per node.
+     * @return Number of connections per node.
      */
     public int getConnectionsPerNode() {
         return connectionsPerNode;
@@ -1512,7 +1691,8 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
      * See {@link #setConnectTimeout(long)}.
      *
      * @return Connect timeout.
-     */public long getConnectTimeout() {
+     */
+    public long getConnectTimeout() {
         return connTimeout;
     }
 
@@ -1670,6 +1850,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
      * @param selectorSpins Selector thread busy-loop iterations.
      * @return {@code this} for chaining.
      */
+    @IgniteSpiConfiguration(optional = true)
     public TcpCommunicationSpi setSelectorSpins(long selectorSpins) {
         this.selectorSpins = selectorSpins;
 
@@ -1824,13 +2005,14 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
      * When set to a positive number, communication SPI will monitor clients outbound message queue sizes and will drop
      * those clients whose queue exceeded this limit.
      * <p/>
-     * Usually this value should be set to the same value as {@link #getMessageQueueLimit()} which controls
+     * This value should be set to less or equal value than {@link #getMessageQueueLimit()} which controls
      * message back-pressure for server nodes. The default value for this parameter is {@code 0}
      * which means {@code unlimited}.
      *
      * @param slowClientQueueLimit Slow client queue limit.
      * @return {@code this} for chaining.
      */
+    @IgniteSpiConfiguration(optional = true)
     public TcpCommunicationSpi setSlowClientQueueLimit(int slowClientQueueLimit) {
         this.slowClientQueueLimit = slowClientQueueLimit;
 
@@ -1851,21 +2033,37 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
 
     /** {@inheritDoc} */
     @Override public int getSentMessagesCount() {
+        // Listener could be not initialized yet, but discovery thread could try to aggregate metrics.
+        if (metricsLsnr == null)
+            return 0;
+
         return metricsLsnr.sentMessagesCount();
     }
 
     /** {@inheritDoc} */
     @Override public long getSentBytesCount() {
+        // Listener could be not initialized yet, but discovery thread clould try to aggregate metrics.
+        if (metricsLsnr == null)
+            return 0;
+
         return metricsLsnr.sentBytesCount();
     }
 
     /** {@inheritDoc} */
     @Override public int getReceivedMessagesCount() {
+        // Listener could be not initialized yet, but discovery thread could try to aggregate metrics.
+        if (metricsLsnr == null)
+            return 0;
+
         return metricsLsnr.receivedMessagesCount();
     }
 
     /** {@inheritDoc} */
     @Override public long getReceivedBytesCount() {
+        // Listener could be not initialized yet, but discovery thread could try to aggregate metrics.
+        if (metricsLsnr == null)
+            return 0;
+
         return metricsLsnr.receivedBytesCount();
     }
 
@@ -2068,7 +2266,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
         assertParameter(shmemPort > 0 || shmemPort == -1, "shmemPort > 0 || shmemPort == -1");
         assertParameter(selectorsCnt > 0, "selectorsCnt > 0");
         assertParameter(connectionsPerNode > 0, "connectionsPerNode > 0");
-        assertParameter(connectionsPerNode <= 1024, "connectionsPerNode <= 1024");
+        assertParameter(connectionsPerNode <= MAX_CONN_PER_NODE, "connectionsPerNode <= 1024");
 
         if (!failureDetectionTimeoutEnabled()) {
             assertParameter(reconCnt > 0, "reconnectCnt > 0");
@@ -2088,20 +2286,19 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                 "Specified 'unackedMsgsBufSize' is too low, it should be at least 'ackSndThreshold * 5'.");
         }
 
-        if (connectionsPerNode > 1) {
-            connPlc = new ConnectionPolicy() {
-                @Override public int connectionIndex() {
-                    return (int)(U.safeAbs(Thread.currentThread().getId()) % connectionsPerNode);
-                }
-            };
-        }
-        else {
-            connPlc = new ConnectionPolicy() {
-                @Override public int connectionIndex() {
-                    return 0;
-                }
-            };
-        }
+        if (connectionsPerNode > 1)
+            connPlc = new RoundRobinConnectionPolicy();
+        else
+            connPlc = new FirstConnectionPolicy();
+
+        chConnPlc = new ConnectionPolicy() {
+            /** Sequential connection index provider. */
+            private final AtomicInteger chIdx = new AtomicInteger(MAX_CONN_PER_NODE + 1);
+
+            @Override public int connectionIndex() {
+                return chIdx.incrementAndGet();
+            }
+        };
 
         try {
             locHost = U.resolveLocalHost(locAddr);
@@ -2197,8 +2394,8 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                 "since may produce significant delays with some scenarios.");
 
         if (slowClientQueueLimit > 0 && msgQueueLimit > 0 && slowClientQueueLimit >= msgQueueLimit) {
-            U.quietAndWarn(log, "Slow client queue limit is set to a value greater than message queue limit " +
-                "(slow client queue limit will have no effect) [msgQueueLimit=" + msgQueueLimit +
+            U.quietAndWarn(log, "Slow client queue limit is set to a value greater than or equal to message " +
+                "queue limit (slow client queue limit will have no effect) [msgQueueLimit=" + msgQueueLimit +
                 ", slowClientQueueLimit=" + slowClientQueueLimit + ']');
         }
 
@@ -2219,16 +2416,20 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
 
         nioSrvr.start();
 
-        commWorker = new CommunicationWorker(igniteInstanceName);
+        commWorker = new CommunicationWorker(igniteInstanceName, log);
 
-        commWorker.start();
+        new IgniteSpiThread(igniteInstanceName, commWorker.name(), log) {
+            @Override protected void body() {
+                commWorker.run();
+            }
+        }.start();
 
         // Ack start.
         if (log.isDebugEnabled())
             log.debug(startInfo());
     }
 
-    /** {@inheritDoc} }*/
+    /** {@inheritDoc} } */
     @Override public void onContextInitialized0(IgniteSpiContext spiCtx) throws IgniteSpiException {
         spiCtx.registerPort(boundTcpPort, IgnitePortProtocol.TCP);
 
@@ -2239,6 +2440,8 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
         spiCtx.addLocalEventListener(discoLsnr, EVT_NODE_LEFT, EVT_NODE_FAILED);
 
         ctxInitLatch.countDown();
+
+        metricsLsnr = new TcpCommunicationMetricsListener(ignite, spiCtx);
     }
 
     /** {@inheritDoc} */
@@ -2292,12 +2495,19 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                 };
 
                 GridNioMessageReaderFactory readerFactory = new GridNioMessageReaderFactory() {
+                    private IgniteSpiContext context;
+
                     private MessageFormatter formatter;
 
                     @Override public MessageReader reader(GridNioSession ses, MessageFactory msgFactory)
                         throws IgniteCheckedException {
-                        if (formatter == null)
-                            formatter = getSpiContext().messageFormatter();
+                        final IgniteSpiContext ctx = TcpCommunicationSpi.super.getSpiContext();
+
+                        if (formatter == null || context != ctx) {
+                            context = ctx;
+
+                            formatter = context.messageFormatter();
+                        }
 
                         assert formatter != null;
 
@@ -2308,11 +2518,18 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                 };
 
                 GridNioMessageWriterFactory writerFactory = new GridNioMessageWriterFactory() {
+                    private IgniteSpiContext context;
+
                     private MessageFormatter formatter;
 
                     @Override public MessageWriter writer(GridNioSession ses) throws IgniteCheckedException {
-                        if (formatter == null)
-                            formatter = getSpiContext().messageFormatter();
+                        final IgniteSpiContext ctx = TcpCommunicationSpi.super.getSpiContext();
+
+                        if (formatter == null || context != ctx) {
+                            context = ctx;
+
+                            formatter = context.messageFormatter();
+                        }
 
                         assert formatter != null;
 
@@ -2336,19 +2553,19 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
 
                 IgniteBiInClosure<GridNioSession, Integer> queueSizeMonitor =
                     !clientMode && slowClientQueueLimit > 0 ?
-                    new CI2<GridNioSession, Integer>() {
-                        @Override public void apply(GridNioSession ses, Integer qSize) {
-                            checkClientQueueSize(ses, qSize);
-                        }
-                    } :
-                    null;
+                        new CI2<GridNioSession, Integer>() {
+                            @Override public void apply(GridNioSession ses, Integer qSize) {
+                                checkClientQueueSize(ses, qSize);
+                            }
+                        } :
+                        null;
 
                 GridNioFilter[] filters;
 
                 if (isSslEnabled()) {
                     GridNioSslFilter sslFilter =
                         new GridNioSslFilter(ignite.configuration().getSslContextFactory().create(),
-                            true, ByteOrder.nativeOrder(), log);
+                            true, ByteOrder.LITTLE_ENDIAN, log);
 
                     sslFilter.directMode(true);
 
@@ -2367,31 +2584,37 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                         new GridConnectionBytesVerifyFilter(log)
                     };
 
-                GridNioServer<Message> srvr =
-                    GridNioServer.<Message>builder()
-                        .address(locHost)
-                        .port(port)
-                        .listener(srvLsnr)
-                        .logger(log)
-                        .selectorCount(selectorsCnt)
-                        .igniteInstanceName(igniteInstanceName)
-                        .serverName("tcp-comm")
-                        .tcpNoDelay(tcpNoDelay)
-                        .directBuffer(directBuf)
-                        .byteOrder(ByteOrder.nativeOrder())
-                        .socketSendBufferSize(sockSndBuf)
-                        .socketReceiveBufferSize(sockRcvBuf)
-                        .sendQueueLimit(msgQueueLimit)
-                        .directMode(true)
-                        .metricsListener(metricsLsnr)
-                        .writeTimeout(sockWriteTimeout)
-                        .selectorSpins(selectorSpins)
-                        .filters(filters)
-                        .writerFactory(writerFactory)
-                        .skipRecoveryPredicate(skipRecoveryPred)
-                        .messageQueueSizeListener(queueSizeMonitor)
-                        .readWriteSelectorsAssign(usePairedConnections)
-                        .build();
+                GridNioServer.Builder<Message> builder = GridNioServer.<Message>builder()
+                    .address(locHost)
+                    .port(port)
+                    .listener(srvLsnr)
+                    .logger(log)
+                    .selectorCount(selectorsCnt)
+                    .igniteInstanceName(igniteInstanceName)
+                    .serverName("tcp-comm")
+                    .tcpNoDelay(tcpNoDelay)
+                    .directBuffer(directBuf)
+                    .byteOrder(ByteOrder.LITTLE_ENDIAN)
+                    .socketSendBufferSize(sockSndBuf)
+                    .socketReceiveBufferSize(sockRcvBuf)
+                    .sendQueueLimit(msgQueueLimit)
+                    .directMode(true)
+                    .writeTimeout(sockWriteTimeout)
+                    .selectorSpins(selectorSpins)
+                    .filters(filters)
+                    .writerFactory(writerFactory)
+                    .skipRecoveryPredicate(skipRecoveryPred)
+                    .messageQueueSizeListener(queueSizeMonitor)
+                    .readWriteSelectorsAssign(usePairedConnections);
+
+                if (ignite instanceof IgniteEx) {
+                    IgniteEx igniteEx = (IgniteEx)ignite;
+
+                    builder.workerListener(igniteEx.context().workersRegistry())
+                        .metricRegistry(igniteEx.context().metric().registry(COMMUNICATION_METRICS_GROUP_NAME));
+                }
+
+                GridNioServer<Message> srvr = builder.build();
 
                 boundTcpPort = port;
 
@@ -2492,7 +2715,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
         if (nioSrvr != null)
             nioSrvr.stop();
 
-        U.interrupt(commWorker);
+        U.cancel(commWorker);
         U.join(commWorker, log);
 
         U.cancel(shmemAcceptWorker);
@@ -2566,10 +2789,13 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     }
 
     /**
+     * @param consistentId Consistent id of the node.
      * @param nodeId Left node ID.
      */
-    void onNodeLeft(UUID nodeId) {
+    void onNodeLeft(Object consistentId, UUID nodeId) {
         assert nodeId != null;
+
+        metricsLsnr.onNodeLeft(consistentId);
 
         GridCommunicationClient[] clients0 = clients.remove(nodeId);
 
@@ -2706,7 +2932,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                         ClusterNode node0 = getSpiContext().node(node.id());
 
                         if (node0 == null)
-                            throw new IgniteCheckedException("Failed to send message to remote node " +
+                            throw new ClusterTopologyCheckedException("Failed to send message to remote node " +
                                 "(node has left the grid): " + node.id());
                     }
 
@@ -2714,8 +2940,19 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                 }
                 while (retry);
             }
-            catch (IgniteCheckedException e) {
-                throw new IgniteSpiException("Failed to send message to remote node: " + node, e);
+            catch (Throwable t) {
+                if (stopping)
+                    throw new IgniteSpiException("Node is stopping.", t);
+
+                log.error("Failed to send message to remote node [node=" + node + ", msg=" + msg + ']', t);
+
+                if (t instanceof Error)
+                    throw (Error)t;
+
+                if (t instanceof RuntimeException)
+                    throw (RuntimeException)t;
+
+                throw new IgniteSpiException("Failed to send message to remote node: " + node, t);
             }
             finally {
                 if (client != null && removeNodeClient(node.id(), client))
@@ -2838,7 +3075,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                             curClients0[connIdx] : null;
 
                         if (client0 == null) {
-                            client0 = createNioClient(node, connIdx);
+                            client0 = createCommunicationClient(node, connIdx);
 
                             if (client0 != null) {
                                 addNodeClient(node, connIdx, client0);
@@ -2868,6 +3105,9 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                     }
                     catch (Throwable e) {
                         fut.onDone(e);
+
+                        if (e instanceof IgniteTooManyOpenFilesException)
+                            throw e;
 
                         if (e instanceof Error)
                             throw (Error)e;
@@ -2912,7 +3152,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
      * @return Client.
      * @throws IgniteCheckedException If failed.
      */
-    @Nullable private GridCommunicationClient createNioClient(ClusterNode node, int connIdx)
+    @Nullable private GridCommunicationClient createCommunicationClient(ClusterNode node, int connIdx)
         throws IgniteCheckedException {
         assert node != null;
 
@@ -2930,6 +3170,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
         // then we are likely to run on the same host and shared memory communication could be tried.
         if (shmemPort != null && U.sameMacs(locNode, node)) {
             try {
+                // https://issues.apache.org/jira/browse/IGNITE-11126 Rework failure detection logic.
                 GridCommunicationClient client = createShmemClient(
                     node,
                     connIdx,
@@ -2952,19 +3193,44 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
             }
         }
 
-        connectGate.enter();
+        final long start = System.currentTimeMillis();
 
-        try {
-            GridCommunicationClient client = createTcpClient(node, connIdx);
+        GridCommunicationClient client = createTcpClient(node, connIdx);
 
-            if (log.isDebugEnabled())
-                log.debug("TCP client created: " + client);
+        final long time = System.currentTimeMillis() - start;
 
-            return client;
+            if (time > CONNECTION_ESTABLISH_THRESHOLD_MS) {
+                if (log.isInfoEnabled())
+                    log.info("TCP client created [client=" + clientString(client, node) + ", duration=" + time + "ms]");
+            }
+            else if (log.isDebugEnabled())
+                log.debug("TCP client created [client=" + clientString(client, node) + ", duration=" + time + "ms]");
+
+        return client;
+    }
+
+    /**
+     * Returns the string representation of client with protection from null client value. If the client if null,
+     * string representation is built from cluster node.
+     *
+     * @param client communication client
+     * @param node cluster node to which the client tried to establish a connection
+     * @return string representation of client
+     * @throws IgniteCheckedException if failed
+     */
+    private String clientString(GridCommunicationClient client, ClusterNode node) throws IgniteCheckedException {
+        if (client == null) {
+            assert node != null;
+
+            StringJoiner joiner = new StringJoiner(", ");
+
+            for (InetSocketAddress addr : nodeAddresses(node))
+                joiner.add(addr.toString());
+
+            return "null, node addrs=[" + joiner.toString() + "]";
         }
-        finally {
-            connectGate.leave();
-        }
+        else
+            return client.toString();
     }
 
     /**
@@ -2992,7 +3258,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
             try {
                 client = new GridShmemCommunicationClient(
                     connIdx,
-                    metricsLsnr,
+                    metricsLsnr.metricRegistry(),
                     port,
                     timeoutHelper.nextTimeoutChunk(connTimeout),
                     log,
@@ -3015,11 +3281,10 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
             try {
                 safeShmemHandshake(client, node.id(), timeoutHelper.nextTimeoutChunk(connTimeout0));
             }
-            catch (HandshakeTimeoutException | IgniteSpiOperationTimeoutException e) {
+            catch (IgniteSpiOperationTimeoutException e) {
                 client.forceClose();
 
-                if (failureDetectionTimeoutEnabled() && (e instanceof HandshakeTimeoutException ||
-                    timeoutHelper.checkFailureTimeoutReached(e))) {
+                if (failureDetectionTimeoutEnabled() && timeoutHelper.checkFailureTimeoutReached(e)) {
                     if (log.isDebugEnabled())
                         log.debug("Handshake timed out (failure threshold reached) [failureDetectionTimeout=" +
                             failureDetectionTimeout() + ", err=" + e.getMessage() + ", client=" + client + ']');
@@ -3131,7 +3396,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
 
             boolean sameHost = U.sameMacs(getSpiContext().localNode(), node);
 
-            Collections.sort(addrs0, U.inetAddressesComparator(sameHost));
+            addrs0.sort(U.inetAddressesComparator(sameHost));
 
             addrs = new LinkedHashSet<>(addrs0);
         }
@@ -3190,28 +3455,71 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
      * @throws IgniteCheckedException If failed.
      */
     protected GridCommunicationClient createTcpClient(ClusterNode node, int connIdx) throws IgniteCheckedException {
+        GridNioSession ses = createNioSession(node, connIdx);
+
+        return ses == null ?
+            null : new GridTcpNioCommunicationClient(connIdx, ses, log);
+    }
+
+    /**
+     * Returns the established TCP/IP connection between the current node and remote server. A handshake process of
+     * negotiation between two communicating nodes will be performed before the {@link GridNioSession} created.
+     * <p>
+     *     The handshaking process contains of these steps:
+     *
+     *     <ol>
+     *         <li>The local node opens a new {@link SocketChannel} in the <em>blocking</em> mode.</li>
+     *         <li>The local node calls {@link SocketChannel#connect(SocketAddress)} to remote node.</li>
+     *         <li>The remote GridNioAcceptWorker thread accepts new connection.</li>
+     *         <li>The remote node sends back the {@link NodeIdMessage}.</li>
+     *         <li>The local node reads NodeIdMessage from created channel.</li>
+     *         <li>The local node sends the {@link HandshakeMessage2} to remote.</li>
+     *         <li>The remote node processes {@link HandshakeMessage2} in {@link GridNioServerListener#onMessage(GridNioSession, Object)}.</li>
+     *         <li>The remote node sends back the {@link RecoveryLastReceivedMessage}.</li>
+     *     </ol>
+     *
+     *     The handshaking process ends.
+     * </p>
+     * <p>
+     *     <em>Note.</em> The {@link HandshakeTimeoutObject} is created to control execution timeout during the
+     *     whole handshaking process.
+     * </p>
+     *
+     * @param node Remote node identifier to connect with.
+     * @param connIdx Connection index based on configured {@link ConnectionPolicy}.
+     * @return A {@link GridNioSession} connection representation.
+     * @throws IgniteCheckedException If establish connection fails.
+     */
+    private GridNioSession createNioSession(ClusterNode node, int connIdx) throws IgniteCheckedException {
         Collection<InetSocketAddress> addrs = nodeAddresses(node);
 
-        GridCommunicationClient client = null;
+        GridNioSession ses = null;
         IgniteCheckedException errs = null;
 
-        int connectAttempts = 1;
+        long totalTimeout;
+
+        if (failureDetectionTimeoutEnabled())
+            totalTimeout = node.isClient() ? clientFailureDetectionTimeout() : failureDetectionTimeout();
+        else {
+            totalTimeout = ExponentialBackoffTimeoutStrategy.totalBackoffTimeout(
+                connTimeout,
+                maxConnTimeout,
+                reconCnt
+            );
+        }
 
         for (InetSocketAddress addr : addrs) {
-            long connTimeout0 = connTimeout;
+            TimeoutStrategy connTimeoutStgy = new ExponentialBackoffTimeoutStrategy(
+                totalTimeout,
+                failureDetectionTimeoutEnabled() ? DFLT_INITIAL_TIMEOUT : connTimeout,
+                maxConnTimeout
+            );
 
-            int attempt = 1;
-
-            IgniteSpiOperationTimeoutHelper timeoutHelper = new IgniteSpiOperationTimeoutHelper(this,
-                !node.isClient());
-
-            int lastWaitingTimeout = 1;
-
-            while (client == null) { // Reconnection on handshake timeout.
+            while (ses == null) { // Reconnection on handshake timeout.
                 if (stopping)
                     throw new IgniteSpiException("Node is stopping.");
 
-                if (addr.getAddress().isLoopbackAddress() && addr.getPort() == boundTcpPort) {
+                if (isLocalNodeAddress(addr)) {
                     if (log.isDebugEnabled())
                         log.debug("Skipping local address [addr=" + addr +
                             ", locAddrs=" + node.attribute(createSpiAttributeName(ATTR_ADDRS)) +
@@ -3219,10 +3527,15 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                     break;
                 }
 
-                boolean needWait = false;
+                long timeout = 0;
+
+                connectGate.enter();
 
                 try {
-                    SocketChannel ch = SocketChannel.open();
+                    if (getSpiContext().node(node.id()) == null)
+                        throw new ClusterTopologyCheckedException("Failed to send message (node left topology): " + node);
+
+                    SocketChannel ch = openSocketChannel();
 
                     ch.configureBlocking(true);
 
@@ -3235,31 +3548,40 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                     if (sockSndBuf > 0)
                         ch.socket().setSendBufferSize(sockSndBuf);
 
-                    if (getSpiContext().node(node.id()) == null) {
-                        U.closeQuiet(ch);
-
-                        throw new ClusterTopologyCheckedException("Failed to send message " +
-                            "(node left topology): " + node);
-                    }
-
                     ConnectionKey connKey = new ConnectionKey(node.id(), connIdx, -1);
 
                     GridNioRecoveryDescriptor recoveryDesc = outRecoveryDescriptor(node, connKey);
 
+                    assert recoveryDesc != null :
+                        "Recovery descriptor not found [connKey=" + connKey + ", rmtNode=" + node.id() + ']';
+
                     if (!recoveryDesc.reserve()) {
                         U.closeQuiet(ch);
+
+                        // Ensure the session is closed.
+                        GridNioSession sesFromRecovery = recoveryDesc.session();
+
+                        if (sesFromRecovery != null) {
+                            while (sesFromRecovery.closeTime() == 0)
+                                sesFromRecovery.close();
+                        }
 
                         return null;
                     }
 
-                    Long rcvCnt;
+                    long rcvCnt;
 
                     Map<Integer, Object> meta = new HashMap<>();
 
                     GridSslMeta sslMeta = null;
 
                     try {
-                        ch.socket().connect(addr, (int)timeoutHelper.nextTimeoutChunk(connTimeout));
+                        timeout = connTimeoutStgy.nextTimeout();
+
+                        ch.socket().connect(addr, (int) timeout);
+
+                        if (getSpiContext().node(node.id()) == null)
+                            throw new ClusterTopologyCheckedException("Failed to send message (node left topology): " + node);
 
                         if (isSslEnabled()) {
                             meta.put(SSL_META.ordinal(), sslMeta = new GridSslMeta());
@@ -3271,128 +3593,121 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                             sslMeta.sslEngine(sslEngine);
                         }
 
-                        Integer handshakeConnIdx = connIdx;
+                        ClusterNode locNode = getLocalNode();
+
+                        if (locNode == null)
+                            throw new IgniteCheckedException("Local node has not been started or " +
+                                "fully initialized [isStopping=" + getSpiContext().isStopping() + ']');
+
+                        timeout = connTimeoutStgy.nextTimeout(timeout);
 
                         rcvCnt = safeTcpHandshake(ch,
-                            recoveryDesc,
                             node.id(),
-                            timeoutHelper.nextTimeoutChunk(connTimeout0),
+                            timeout,
                             sslMeta,
-                            handshakeConnIdx);
+                            new HandshakeMessage2(locNode.id(),
+                                recoveryDesc.incrementConnectCount(),
+                                recoveryDesc.received(),
+                                connIdx));
 
-                        if (rcvCnt == ALREADY_CONNECTED) {
+                        if (rcvCnt == ALREADY_CONNECTED)
                             return null;
-                        }
-                        else if (rcvCnt == NODE_STOPPING) {
+                        else if (rcvCnt == NODE_STOPPING)
                             throw new ClusterTopologyCheckedException("Remote node started stop procedure: " + node.id());
-                        }
+                        else if (rcvCnt == UNKNOWN_NODE)
+                            throw new ClusterTopologyCheckedException("Remote node does not observe current node " +
+                                "in topology : " + node.id());
                         else if (rcvCnt == NEED_WAIT) {
-                            needWait = true;
+                            //check that failure timeout will be reached after sleep(outOfTopDelay).
+                            if (connTimeoutStgy.checkTimeout(DFLT_NEED_WAIT_DELAY)) {
+                                U.warn(log, "Handshake NEED_WAIT timed out (will stop attempts to perform the handshake) " +
+                                    "[node=" + node.id() +
+                                    ", connTimeoutStgy=" + connTimeoutStgy +
+                                    ", addr=" + addr +
+                                    ", failureDetectionTimeoutEnabled=" + failureDetectionTimeoutEnabled() +
+                                    ", timeout=" + timeout + ']');
 
-                            continue;
+                                throw new ClusterTopologyCheckedException("Failed to connect to node " +
+                                    "(current or target node is out of topology on target node within timeout). " +
+                                        "Make sure that each ComputeTask and cache Transaction has a timeout set " +
+                                        "in order to prevent parties from waiting forever in case of network issues " +
+                                        "[nodeId=" + node.id() + ", addrs=" + addrs + ']');
+                            }
+                            else {
+                                if (log.isDebugEnabled())
+                                    log.debug("NEED_WAIT received, handshake after delay [node = "
+                                        + node + ", outOfTopologyDelay = " + DFLT_NEED_WAIT_DELAY + "ms]");
+
+                                U.sleep(DFLT_NEED_WAIT_DELAY);
+
+                                continue;
+                            }
                         }
+                        else if (rcvCnt < 0)
+                            throw new IgniteCheckedException("Unsupported negative receivedCount [rcvCnt=" + rcvCnt +
+                                ", senderNode=" + node + ']');
 
+                        recoveryDesc.onHandshake(rcvCnt);
+
+                        meta.put(CONSISTENT_ID_META, node.consistentId());
                         meta.put(CONN_IDX_META, connKey);
+                        meta.put(GridNioServer.RECOVERY_DESC_META_KEY, recoveryDesc);
 
-                        if (recoveryDesc != null) {
-                            recoveryDesc.onHandshake(rcvCnt);
-
-                            meta.put(GridNioServer.RECOVERY_DESC_META_KEY, recoveryDesc);
-                        }
-
-                        GridNioSession ses = nioSrvr.createSession(ch, meta, false, null).get();
-
-                        client = new GridTcpNioCommunicationClient(connIdx, ses, log);
+                        ses = nioSrvr.createSession(ch, meta, false, null).get();
                     }
                     finally {
-                        if (client == null) {
+                        if (ses == null) {
                             U.closeQuiet(ch);
 
                             if (recoveryDesc != null)
                                 recoveryDesc.release();
-
-                            if (needWait) {
-                                if (lastWaitingTimeout < 60000)
-                                    lastWaitingTimeout *= 2;
-
-                                U.sleep(lastWaitingTimeout);
-                            }
                         }
                     }
                 }
-                catch (HandshakeTimeoutException | IgniteSpiOperationTimeoutException e) {
-                    if (client != null) {
-                        client.forceClose();
+                catch (IgniteSpiOperationTimeoutException e) { // Handshake is timed out.
+                    if (ses != null) {
+                        ses.close();
 
-                        client = null;
+                        ses = null;
                     }
 
-                    if (failureDetectionTimeoutEnabled() && (e instanceof HandshakeTimeoutException ||
-                        X.hasCause(e, SocketException.class) ||
-                        timeoutHelper.checkFailureTimeoutReached(e))) {
-
-                        String msg = "Handshake timed out (failure detection timeout is reached) " +
-                            "[failureDetectionTimeout=" + failureDetectionTimeout() + ", addr=" + addr + ']';
-
-                        onException(msg, e);
-
-                        if (log.isDebugEnabled())
-                            log.debug(msg);
-
-                        if (errs == null)
-                            errs = new IgniteCheckedException("Failed to connect to node (is node still alive?). " +
-                                "Make sure that each ComputeTask and cache Transaction has a timeout set " +
-                                "in order to prevent parties from waiting forever in case of network issues " +
-                                "[nodeId=" + node.id() + ", addrs=" + addrs + ']');
-
-                        errs.addSuppressed(new IgniteCheckedException("Failed to connect to address: " + addr, e));
-
-                        break;
-                    }
-
-                    assert !failureDetectionTimeoutEnabled();
-
-                    onException("Handshake timed out (will retry with increased timeout) [timeout=" + connTimeout0 +
+                    onException("Handshake timed out (will retry with increased timeout) [connTimeoutStrategy=" + connTimeoutStgy +
                         ", addr=" + addr + ']', e);
 
                     if (log.isDebugEnabled())
-                        log.debug(
-                            "Handshake timed out (will retry with increased timeout) [timeout=" + connTimeout0 +
-                                ", addr=" + addr + ", err=" + e + ']');
+                        log.debug("Handshake timed out (will retry with increased timeout) [connTimeoutStrategy=" + connTimeoutStgy +
+                                ", addr=" + addr + ", err=" + e + ']'
+                        );
 
-                    if (attempt == reconCnt || connTimeout0 > maxConnTimeout) {
-                        U.warn(log, "Handshake timedout (will stop attempts to perform the handshake) " +
-                            "[node=" + node.id() + ", timeout=" + connTimeout0 +
-                            ", maxConnTimeout=" + maxConnTimeout +
-                            ", attempt=" + attempt + ", reconCnt=" + reconCnt +
-                            ", err=" + e.getMessage() + ", addr=" + addr + ']');
+                    if (connTimeoutStgy.checkTimeout()) {
+                        U.warn(log, "Handshake timed out (will stop attempts to perform the handshake) " +
+                            "[node=" + node.id() + ", connTimeoutStrategy=" + connTimeoutStgy +
+                            ", err=" + e.getMessage() + ", addr=" + addr +
+                            ", failureDetectionTimeoutEnabled=" + failureDetectionTimeoutEnabled() +
+                            ", timeout=" + timeout + ']');
+
+                        String msg = "Failed to connect to node (is node still alive?). " +
+                            "Make sure that each ComputeTask and cache Transaction has a timeout set " +
+                            "in order to prevent parties from waiting forever in case of network issues " +
+                            "[nodeId=" + node.id() + ", addrs=" + addrs + ']';
 
                         if (errs == null)
-                            errs = new IgniteCheckedException("Failed to connect to node (is node still alive?). " +
-                                "Make sure that each ComputeTask and cache Transaction has a timeout set " +
-                                "in order to prevent parties from waiting forever in case of network issues " +
-                                "[nodeId=" + node.id() + ", addrs=" + addrs + ']');
-
-                        errs.addSuppressed(new IgniteCheckedException("Failed to connect to address: " + addr, e));
+                            errs = new IgniteCheckedException(msg, e);
+                        else
+                            errs.addSuppressed(new IgniteCheckedException(msg, e));
 
                         break;
-                    }
-                    else {
-                        attempt++;
-
-                        connTimeout0 *= 2;
-
-                        // Continue loop.
                     }
                 }
                 catch (ClusterTopologyCheckedException e) {
                     throw e;
                 }
                 catch (Exception e) {
-                    if (client != null) {
-                        client.forceClose();
+                    // Most probably IO error on socket connect or handshake.
+                    if (ses != null) {
+                        ses.close();
 
-                        client = null;
+                        ses = null;
                     }
 
                     onException("Client creation failed [addr=" + addr + ", err=" + e + ']', e);
@@ -3400,81 +3715,134 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                     if (log.isDebugEnabled())
                         log.debug("Client creation failed [addr=" + addr + ", err=" + e + ']');
 
-                    boolean failureDetThrReached = timeoutHelper.checkFailureTimeoutReached(e);
+                    if (X.hasCause(e, "Too many open files", SocketException.class))
+                        throw new IgniteTooManyOpenFilesException(e);
 
-                    if (enableTroubleshootingLog)
-                        U.error(log, "Failed to establish connection to a remote node [node=" + node +
-                            ", addr=" + addr + ", connectAttempts=" + connectAttempts +
-                            ", failureDetThrReached=" + failureDetThrReached + ']', e);
+                    // check if timeout occured in case of unrecoverable exception
+                    if (connTimeoutStgy.checkTimeout()) {
+                        U.warn(log, "Connection timed out (will stop attempts to perform the connect) " +
+                                "[node=" + node.id() + ", connTimeoutStgy=" + connTimeoutStgy +
+                                ", failureDetectionTimeoutEnabled=" + failureDetectionTimeoutEnabled() +
+                                ", timeout=" + timeout +
+                                ", err=" + e.getMessage() + ", addr=" + addr + ']');
 
-                    if (failureDetThrReached)
-                        LT.warn(log, "Connect timed out (consider increasing 'failureDetectionTimeout' " +
-                            "configuration property) [addr=" + addr + ", failureDetectionTimeout=" +
-                            failureDetectionTimeout() + ']');
-                    else if (X.hasCause(e, SocketTimeoutException.class))
-                        LT.warn(log, "Connect timed out (consider increasing 'connTimeout' " +
-                            "configuration property) [addr=" + addr + ", connTimeout=" + connTimeout + ']');
+                        String msg = "Failed to connect to node (is node still alive?). " +
+                                "Make sure that each ComputeTask and cache Transaction has a timeout set " +
+                                "in order to prevent parties from waiting forever in case of network issues " +
+                                "[nodeId=" + node.id() + ", addrs=" + addrs + ']';
 
-                    if (errs == null)
-                        errs = new IgniteCheckedException("Failed to connect to node (is node still alive?). " +
-                            "Make sure that each ComputeTask and cache Transaction has a timeout set " +
-                            "in order to prevent parties from waiting forever in case of network issues " +
-                            "[nodeId=" + node.id() + ", addrs=" + addrs + ']');
+                        if (errs == null)
+                            errs = new IgniteCheckedException(msg, e);
+                        else
+                            errs.addSuppressed(new IgniteCheckedException(msg, e));
 
-                    errs.addSuppressed(new IgniteCheckedException("Failed to connect to address " +
-                        "[addr=" + addr + ", err=" + e.getMessage() + ']', e));
-
-                    // Reconnect for the second time, if connection is not established.
-                    if (!failureDetThrReached && connectAttempts < 5 &&
-                        (X.hasCause(e, ConnectException.class, HandshakeException.class, SocketTimeoutException.class))) {
-                        U.sleep(200);
-
-                        connectAttempts++;
-
-                        continue;
+                        break;
                     }
 
-                    break;
+                    if (isRecoverableException(e))
+                        U.sleep(DFLT_RECONNECT_DELAY);
+                    else {
+                        String msg = "Failed to connect to node due to unrecoverable exception (is node still alive?). " +
+                                "Make sure that each ComputeTask and cache Transaction has a timeout set " +
+                                "in order to prevent parties from waiting forever in case of network issues " +
+                                "[nodeId=" + node.id() + ", addrs=" + addrs + ", err= "+ e + ']';
+
+                        if (errs == null)
+                            errs = new IgniteCheckedException(msg, e);
+                        else
+                            errs.addSuppressed(new IgniteCheckedException(msg, e));
+
+                        break;
+                    }
                 }
+                finally {
+                    connectGate.leave();
+                }
+
+                CommunicationWorker commWorker0 = commWorker;
+
+                if (commWorker0 != null && commWorker0.runner() == Thread.currentThread())
+                    commWorker0.updateHeartbeat();
             }
 
-            if (client != null)
+            if (ses != null)
                 break;
         }
 
-        if (client == null)
-            processClientCreationError(node, addrs, errs);
+        if (ses == null)
+            processSessionCreationError(node, addrs, errs == null ? new IgniteCheckedException("No session found") : errs);
 
-        return client;
+        return ses;
     }
 
     /**
-     * Process errors if TCP client to remote node hasn't been created.
+     * Opens a socket channel.
+     *
+     * @return A new socket channel.
+     * @throws IOException If an I/O error occurs.
+     */
+    protected SocketChannel openSocketChannel() throws IOException {
+        return SocketChannel.open();
+    }
+
+    /**
+     * Closing connections to node.
+     * NOTE: It is recommended only for tests.
+     *
+     * @param nodeId Node for which to close connections.
+     * @throws IgniteCheckedException If occurs.
+     */
+    void closeConnections(UUID nodeId) throws IgniteCheckedException {
+        GridCommunicationClient[] clients = this.clients.remove(nodeId);
+        if (nonNull(clients)) {
+            for (GridCommunicationClient client : clients)
+                client.forceClose();
+        }
+
+        for (ConnectionKey connKey : clientFuts.keySet()) {
+            if (!nodeId.equals(connKey))
+                continue;
+
+            GridFutureAdapter<GridCommunicationClient> fut = clientFuts.remove(connKey);
+            if (nonNull(fut))
+                fut.get().forceClose();
+        }
+    }
+
+    /**
+     * Check is passed  socket address belong to current node. This method should return true only if the passed
+     * in address represent an address which will result in a connection to the local node.
+     *
+     * @param addr address to check.
+     * @return true if passed address belongs to local node, otherwise false.
+     */
+    private boolean isLocalNodeAddress(InetSocketAddress addr) {
+        return addr.getPort() == boundTcpPort
+            && (locHost.equals(addr.getAddress())
+                || addr.getAddress().isAnyLocalAddress()
+                || (locHost.isAnyLocalAddress() && U.isLocalAddress(addr.getAddress())));
+    }
+
+    /**
+     * Process errors if TCP/IP {@link GridNioSession} creation to remote node hasn't been performed.
      *
      * @param node Remote node.
      * @param addrs Remote node addresses.
      * @param errs TCP client creation errors.
-     *
      * @throws IgniteCheckedException If failed.
      */
-    protected void processClientCreationError(
+    protected void processSessionCreationError(
         ClusterNode node,
         Collection<InetSocketAddress> addrs,
         IgniteCheckedException errs
     ) throws IgniteCheckedException {
         assert errs != null;
 
-        if (X.hasCause(errs, ConnectException.class))
-            LT.warn(log, "Failed to connect to a remote node " +
-                "(make sure that destination node is alive and " +
-                "operating system firewall is disabled on local and remote hosts) " +
-                "[addrs=" + addrs + ']');
-
         boolean commErrResolve = false;
 
         IgniteSpiContext ctx = getSpiContext();
 
-        if (connectionError(errs) && ctx.communicationFailureResolveSupported()) {
+        if (isRecoverableException(errs) && ctx.communicationFailureResolveSupported()) {
             commErrResolve = true;
 
             ctx.resolveCommunicationFailure(node, errs);
@@ -3482,8 +3850,11 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
 
         if (!commErrResolve && enableForcibleNodeKill) {
             if (ctx.node(node.id()) != null
-                && (CU.clientNode(node) ||  !CU.clientNode(getLocalNode())) &&
-                connectionError(errs)) {
+                && node.isClient()
+                && !getLocalNode().isClient()
+                && isRecoverableException(errs)
+            ) {
+                // Only server can fail client for now, as in TcpDiscovery resolveCommunicationFailure() is not supported.
                 String msg = "TcpCommunicationSpi failed to establish connection to node, node will be dropped from " +
                     "cluster [" + "rmtNode=" + node + ']';
 
@@ -3499,21 +3870,26 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
             }
         }
 
-        if (!X.hasCause(errs, SocketTimeoutException.class, HandshakeTimeoutException.class,
-            IgniteSpiOperationTimeoutException.class))
-            throw errs;
+        throw errs;
     }
 
     /**
      * @param errs Error.
-     * @return {@code True} if error was caused by some connection IO error.
+     * @return {@code True} if error was caused by some connection IO error or IgniteCheckedException due to timeout.
      */
-    private static boolean connectionError(IgniteCheckedException errs) {
-        return X.hasCause(errs, ConnectException.class,
+    private boolean isRecoverableException(Exception errs) {
+        return X.hasCause(
+            errs,
+            IOException.class,
             HandshakeException.class,
-            SocketTimeoutException.class,
-            HandshakeTimeoutException.class,
-            IgniteSpiOperationTimeoutException.class);
+            IgniteSpiOperationTimeoutException.class
+        );
+    }
+
+    /** */
+    private IgniteSpiOperationTimeoutException handshakeTimeoutException() {
+        return new IgniteSpiOperationTimeoutException("Failed to perform handshake due to timeout " +
+            "(consider increasing 'connectionTimeout' configuration property).");
     }
 
     /**
@@ -3539,16 +3915,10 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
             client.doHandshake(new HandshakeClosure(rmtNodeId));
         }
         finally {
-            boolean cancelled = obj.cancel();
-
-            if (cancelled)
+            if (obj.cancel())
                 removeTimeoutObject(obj);
-
-            // Ignoring whatever happened after timeout - reporting only timeout event.
-            if (!cancelled)
-                throw new HandshakeTimeoutException(
-                    new IgniteSpiOperationTimeoutException("Failed to perform handshake due to timeout " +
-                        "(consider increasing 'connectionTimeout' configuration property)."));
+            else
+                throw handshakeTimeoutException();
         }
     }
 
@@ -3556,43 +3926,49 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
      * Performs handshake in timeout-safe way.
      *
      * @param ch Socket channel.
-     * @param recovery Recovery descriptor if use recovery handshake, otherwise {@code null}.
      * @param rmtNodeId Remote node.
      * @param timeout Timeout for handshake.
      * @param sslMeta Session meta.
-     * @param handshakeConnIdx Non null connection index if need send it in handshake.
-     * @throws IgniteCheckedException If handshake failed or wasn't completed withing timeout.
+     * @param msg {@link HandshakeMessage} or {@link HandshakeMessage2} to send.
      * @return Handshake response.
+     * @throws IgniteCheckedException If handshake failed or wasn't completed withing timeout.
      */
     @SuppressWarnings("ThrowFromFinallyBlock")
     private long safeTcpHandshake(
         SocketChannel ch,
-        @Nullable GridNioRecoveryDescriptor recovery,
         UUID rmtNodeId,
         long timeout,
         GridSslMeta sslMeta,
-        @Nullable Integer handshakeConnIdx
+        HandshakeMessage msg
     ) throws IgniteCheckedException {
         HandshakeTimeoutObject obj = new HandshakeTimeoutObject<>(ch, U.currentTimeMillis() + timeout);
 
         addTimeoutObject(obj);
 
-        long rcvCnt = 0;
+        long rcvCnt;
 
         try {
             BlockingSslHandler sslHnd = null;
 
             ByteBuffer buf;
 
+            // Step 1. Get remote node response with the remote nodeId value.
             if (isSslEnabled()) {
                 assert sslMeta != null;
 
-                sslHnd = new BlockingSslHandler(sslMeta.sslEngine(), ch, directBuf, ByteOrder.nativeOrder(), log);
+                sslHnd = new BlockingSslHandler(sslMeta.sslEngine(), ch, directBuf, ByteOrder.LITTLE_ENDIAN, log);
 
                 if (!sslHnd.handshake())
                     throw new HandshakeException("SSL handshake is not completed.");
 
                 ByteBuffer handBuff = sslHnd.applicationBuffer();
+
+                if (handBuff.remaining() >= DIRECT_TYPE_SIZE) {
+                    short msgType = makeMessageType(handBuff.get(0), handBuff.get(1));
+
+                    if (msgType == HANDSHAKE_WAIT_MSG_TYPE)
+                        return NEED_WAIT;
+                }
 
                 if (handBuff.remaining() < NodeIdMessage.MESSAGE_FULL_SIZE) {
                     buf = ByteBuffer.allocate(1000);
@@ -3605,6 +3981,13 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                     buf.flip();
 
                     buf = sslHnd.decode(buf);
+
+                    if (handBuff.remaining() >= DIRECT_TYPE_SIZE) {
+                        short msgType = makeMessageType(handBuff.get(0), handBuff.get(1));
+
+                        if (msgType == HANDSHAKE_WAIT_MSG_TYPE)
+                            return NEED_WAIT;
+                    }
                 }
                 else
                     buf = handBuff;
@@ -3617,6 +4000,13 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
 
                     if (read == -1)
                         throw new HandshakeException("Failed to read remote node ID (connection closed).");
+
+                    if (read >= DIRECT_TYPE_SIZE) {
+                        short msgType = makeMessageType(buf.get(0), buf.get(1));
+
+                        if (msgType == HANDSHAKE_WAIT_MSG_TYPE)
+                            return NEED_WAIT;
+                    }
 
                     i += read;
                 }
@@ -3633,139 +4023,103 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
             if (isSslEnabled()) {
                 assert sslHnd != null;
 
-                ch.write(sslHnd.encrypt(ByteBuffer.wrap(U.IGNITE_HEADER)));
+                U.writeFully(ch, sslHnd.encrypt(ByteBuffer.wrap(U.IGNITE_HEADER)));
             }
             else
-                ch.write(ByteBuffer.wrap(U.IGNITE_HEADER));
+                U.writeFully(ch, ByteBuffer.wrap(U.IGNITE_HEADER));
 
-            ClusterNode locNode = getLocalNode();
+            // Step 2. Prepare Handshake message to send to the remote node.
+            if (log.isDebugEnabled())
+                log.debug("Writing handshake message [rmtNode=" + rmtNodeId + ", msg=" + msg + ']');
 
-            if (locNode == null)
-                throw new IgniteCheckedException("Local node has not been started or " +
-                    "fully initialized [isStopping=" + getSpiContext().isStopping() + ']');
+            buf = ByteBuffer.allocate(msg.getMessageSize());
 
-            if (recovery != null) {
-                HandshakeMessage msg;
+            buf.order(ByteOrder.LITTLE_ENDIAN);
 
-                int msgSize = HandshakeMessage.MESSAGE_FULL_SIZE;
+            boolean written = msg.writeTo(buf, null);
 
-                if (handshakeConnIdx != null) {
-                    msg = new HandshakeMessage2(locNode.id(),
-                        recovery.incrementConnectCount(),
-                        recovery.received(),
-                        handshakeConnIdx);
+            assert written;
 
-                    msgSize += 4;
+            buf.flip();
+
+            if (isSslEnabled()) {
+                assert sslHnd != null;
+
+                U.writeFully(ch, sslHnd.encrypt(buf));
+            }
+            else
+                U.writeFully(ch, buf);
+
+            if (log.isDebugEnabled())
+                log.debug("Waiting for handshake [rmtNode=" + rmtNodeId + ']');
+
+            // Step 3. Waiting for response from the remote node with their receive count message.
+            if (isSslEnabled()) {
+                assert sslHnd != null;
+
+                buf = ByteBuffer.allocate(1000);
+                buf.order(ByteOrder.LITTLE_ENDIAN);
+
+                ByteBuffer decode = ByteBuffer.allocate(2 * buf.capacity());
+                decode.order(ByteOrder.LITTLE_ENDIAN);
+
+                for (int i = 0; i < RecoveryLastReceivedMessage.MESSAGE_FULL_SIZE; ) {
+                    int read = ch.read(buf);
+
+                    if (read == -1)
+                        throw new HandshakeException("Failed to read remote node recovery handshake " +
+                            "(connection closed).");
+
+                    buf.flip();
+
+                    ByteBuffer decode0 = sslHnd.decode(buf);
+
+                    i += decode0.remaining();
+
+                    decode = appendAndResizeIfNeeded(decode, decode0);
+
+                    buf.clear();
                 }
-                else {
-                    msg = new HandshakeMessage(locNode.id(),
-                        recovery.incrementConnectCount(),
-                        recovery.received());
+
+                decode.flip();
+
+                rcvCnt = decode.getLong(Message.DIRECT_TYPE_SIZE);
+
+                if (decode.limit() > RecoveryLastReceivedMessage.MESSAGE_FULL_SIZE) {
+                    decode.position(RecoveryLastReceivedMessage.MESSAGE_FULL_SIZE);
+
+                    sslMeta.decodedBuffer(decode);
                 }
 
-                if (log.isDebugEnabled())
-                    log.debug("Writing handshake message [locNodeId=" + locNode.id() +
-                        ", rmtNode=" + rmtNodeId + ", msg=" + msg + ']');
+                ByteBuffer inBuf = sslHnd.inputBuffer();
 
-                buf = ByteBuffer.allocate(msgSize);
-
-                buf.order(ByteOrder.nativeOrder());
-
-                boolean written = msg.writeTo(buf, null);
-
-                assert written;
-
-                buf.flip();
-
-                if (isSslEnabled()) {
-                    assert sslHnd != null;
-
-                    ch.write(sslHnd.encrypt(buf));
-                }
-                else
-                    ch.write(buf);
+                if (inBuf.position() > 0)
+                    sslMeta.encodedBuffer(inBuf);
             }
             else {
-                if (isSslEnabled()) {
-                    assert sslHnd != null;
+                buf = ByteBuffer.allocate(RecoveryLastReceivedMessage.MESSAGE_FULL_SIZE);
 
-                    ch.write(sslHnd.encrypt(ByteBuffer.wrap(NodeIdMessage.nodeIdBytesWithType(safeLocalNodeId()))));
+                buf.order(ByteOrder.LITTLE_ENDIAN);
+
+                for (int i = 0; i < RecoveryLastReceivedMessage.MESSAGE_FULL_SIZE; ) {
+                    int read = ch.read(buf);
+
+                    if (read == -1)
+                        throw new HandshakeException("Failed to read remote node recovery handshake " +
+                            "(connection closed).");
+
+                    i += read;
                 }
-                else
-                    ch.write(ByteBuffer.wrap(NodeIdMessage.nodeIdBytesWithType(safeLocalNodeId())));
+
+                rcvCnt = buf.getLong(Message.DIRECT_TYPE_SIZE);
             }
 
-            if (recovery != null) {
+            if (log.isDebugEnabled())
+                log.debug("Received handshake message [rmtNode=" + rmtNodeId + ", rcvCnt=" + rcvCnt + ']');
+
+            if (rcvCnt == -1) {
                 if (log.isDebugEnabled())
-                    log.debug("Waiting for handshake [rmtNode=" + rmtNodeId + ']');
-
-                if (isSslEnabled()) {
-                    assert sslHnd != null;
-
-                    buf = ByteBuffer.allocate(1000);
-                    buf.order(ByteOrder.nativeOrder());
-
-                    ByteBuffer decode = ByteBuffer.allocate(2 * buf.capacity());
-                    decode.order(ByteOrder.nativeOrder());
-
-                    for (int i = 0; i < RecoveryLastReceivedMessage.MESSAGE_FULL_SIZE; ) {
-                        int read = ch.read(buf);
-
-                        if (read == -1)
-                            throw new HandshakeException("Failed to read remote node recovery handshake " +
-                                "(connection closed).");
-
-                        buf.flip();
-
-                        ByteBuffer decode0 = sslHnd.decode(buf);
-
-                        i += decode0.remaining();
-
-                        decode = appendAndResizeIfNeeded(decode, decode0);
-
-                        buf.clear();
-                    }
-
-                    decode.flip();
-
-                    rcvCnt = decode.getLong(Message.DIRECT_TYPE_SIZE);
-
-                    if (decode.limit() > RecoveryLastReceivedMessage.MESSAGE_FULL_SIZE) {
-                        decode.position(RecoveryLastReceivedMessage.MESSAGE_FULL_SIZE);
-
-                        sslMeta.decodedBuffer(decode);
-                    }
-
-                    ByteBuffer inBuf = sslHnd.inputBuffer();
-
-                    if (inBuf.position() > 0)
-                        sslMeta.encodedBuffer(inBuf);
-                }
-                else {
-                    buf = ByteBuffer.allocate(RecoveryLastReceivedMessage.MESSAGE_FULL_SIZE);
-
-                    buf.order(ByteOrder.nativeOrder());
-
-                    for (int i = 0; i < RecoveryLastReceivedMessage.MESSAGE_FULL_SIZE; ) {
-                        int read = ch.read(buf);
-
-                        if (read == -1)
-                            throw new HandshakeException("Failed to read remote node recovery handshake " +
-                                "(connection closed).");
-
-                        i += read;
-                    }
-
-                    rcvCnt = buf.getLong(Message.DIRECT_TYPE_SIZE);
-                }
-
-                if (log.isDebugEnabled())
-                    log.debug("Received handshake message [rmtNode=" + rmtNodeId + ", rcvCnt=" + rcvCnt + ']');
-
-                if (rcvCnt == -1) {
-                    if (log.isDebugEnabled())
-                        log.debug("Connection rejected, will retry client creation [rmtNode=" + rmtNodeId + ']');
-                }
+                    log.debug("Connection rejected, will retry client creation [rmtNode=" + rmtNodeId + ']');
             }
         }
         catch (IOException e) {
@@ -3775,16 +4129,10 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
             throw new IgniteCheckedException("Failed to read from channel.", e);
         }
         finally {
-            boolean cancelled = obj.cancel();
-
-            if (cancelled)
+            if (obj.cancel())
                 removeTimeoutObject(obj);
-
-            // Ignoring whatever happened after timeout - reporting only timeout event.
-            if (!cancelled)
-                throw new HandshakeTimeoutException(
-                    new IgniteSpiOperationTimeoutException("Failed to perform handshake due to timeout " +
-                        "(consider increasing 'connectionTimeout' configuration property)."));
+            else
+                throw handshakeTimeoutException();
         }
 
         return rcvCnt;
@@ -3804,6 +4152,21 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
         else if (log.isDebugEnabled())
             log.debug("Received communication message without any registered listeners (will ignore, " +
                 "is node stopping?) [senderNodeId=" + sndId + ", msg=" + msg + ']');
+    }
+
+    /**
+     * @param nodeId The remote node id.
+     * @param channel The configured channel to notify listeners with.
+     * @param initMsg Channel initialization message with additional channel params.
+     */
+    private void notifyChannelEvtListener(UUID nodeId, Channel channel, Message initMsg) {
+        if (log.isDebugEnabled())
+            log.debug("Notify appropriate listeners due to a new channel opened: " + channel);
+
+        CommunicationListener<Message> lsnr0 = lsnr;
+
+        if (lsnr0 instanceof CommunicationListenerEx)
+            ((CommunicationListenerEx<Message>)lsnr0).onChannelOpened(nodeId, initMsg, channel);
     }
 
     /**
@@ -3840,7 +4203,8 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
         if (nioSrvr != null)
             nioSrvr.stop();
 
-        U.interrupt(commWorker);
+        if (commWorker != null)
+            U.interrupt(commWorker.runner());
 
         U.join(commWorker, log);
 
@@ -3888,6 +4252,20 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
         }
 
         return false;
+    }
+
+    /**
+     * @param key The connection key to cleanup descriptors on local node.
+     */
+    private void cleanupLocalNodeRecoveryDescriptor(ConnectionKey key) {
+        ClusterNode node = getLocalNode();
+
+        if (usePairedConnections(node)) {
+            inRecDescs.remove(key);
+            outRecDescs.remove(key);
+        }
+        else
+            recoveryDescs.remove(key);
     }
 
     /**
@@ -3945,7 +4323,10 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
      * @return Node ID message.
      */
     private NodeIdMessage nodeIdMessage() {
-        return new NodeIdMessage(safeLocalNodeId());
+        final UUID locNodeId = (ignite instanceof IgniteEx) ? ((IgniteEx)ignite).context().localNodeId() :
+            safeLocalNodeId();
+
+        return new NodeIdMessage(locNodeId);
     }
 
     /**
@@ -3975,35 +4356,26 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
         return this;
     }
 
+    /**
+     * Checks whether remote nodes support {@link HandshakeWaitMessage}.
+     *
+     * @return {@code True} if remote nodes support {@link HandshakeWaitMessage}.
+     */
+    private boolean isHandshakeWaitSupported() {
+        DiscoverySpi discoSpi = ignite().configuration().getDiscoverySpi();
+
+        if (discoSpi instanceof IgniteDiscoverySpi)
+            return ((IgniteDiscoverySpi)discoSpi).allNodesSupport(IgniteFeatures.TCP_COMMUNICATION_SPI_HANDSHAKE_WAIT_MESSAGE);
+        else {
+            Collection<ClusterNode> nodes = discoSpi.getRemoteNodes();
+
+            return IgniteFeatures.allNodesSupports(nodes, IgniteFeatures.TCP_COMMUNICATION_SPI_HANDSHAKE_WAIT_MESSAGE);
+        }
+    }
+
     /** {@inheritDoc} */
     @Override public String toString() {
         return S.toString(TcpCommunicationSpi.class, this);
-    }
-
-    /** Internal exception class for proper timeout handling. */
-    private static class HandshakeException extends IgniteCheckedException {
-        /** */
-        private static final long serialVersionUID = 0L;
-
-        /**
-         * @param msg Error message.
-         */
-        HandshakeException(String msg) {
-            super(msg);
-        }
-    }
-
-    /** Internal exception class for proper timeout handling. */
-    private static class HandshakeTimeoutException extends IgniteCheckedException {
-        /** */
-        private static final long serialVersionUID = 0L;
-
-        /**
-         * @param cause Exception cause
-         */
-        HandshakeTimeoutException(IgniteSpiOperationTimeoutException cause) {
-            super(cause);
-        }
     }
 
     /**
@@ -4075,15 +4447,118 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     }
 
     /**
+     * Concatenates the two parameter bytes to form a message type value.
+     *
+     * @param b0 The first byte.
+     * @param b1 The second byte.
+     */
+    public static short makeMessageType(byte b0, byte b1) {
+        return (short)((b1 & 0xFF) << 8 | b0 & 0xFF);
+    }
+
+    /**
+     * @param ignite Ignite.
+     */
+    private static WorkersRegistry getWorkersRegistry(Ignite ignite) {
+        return ignite instanceof IgniteEx ? ((IgniteEx)ignite).context().workersRegistry() : null;
+    }
+
+    /**
+     * @param remote Destination cluster node to communicate with.
+     * @param initMsg Configuration channel attributes wrapped into the message.
+     * @return The future, which will be finished on channel ready.
+     * @throws IgniteSpiException If fails.
+     */
+    public IgniteInternalFuture<Channel> openChannel(
+        ClusterNode remote,
+        Message initMsg
+    ) throws IgniteSpiException {
+        assert !remote.isLocal() : remote;
+        assert initMsg != null;
+        assert chConnPlc != null;
+        assert nodeSupports(remote, CHANNEL_COMMUNICATION) : "Node doesn't support direct connection over socket channel " +
+                "[nodeId=" + remote.id() + ']';
+
+        ConnectionKey key = new ConnectionKey(remote.id(), chConnPlc.connectionIndex());
+
+        GridFutureAdapter<Channel> chFut = new GridFutureAdapter<>();
+
+        connectGate.enter();
+
+        try {
+            GridNioSession ses = createNioSession(remote, key.connectionIndex());
+
+            assert ses != null : "Session must be established [remoteId=" + remote.id() + ", key=" + key + ']';
+
+            cleanupLocalNodeRecoveryDescriptor(key);
+            ses.addMeta(CHANNEL_FUT_META, chFut);
+
+            // Send configuration message over the created session.
+            ses.send(initMsg)
+                .listen(f -> {
+                    if (f.error() != null) {
+                        GridFutureAdapter<Channel> rq = ses.meta(CHANNEL_FUT_META);
+
+                        assert rq != null;
+
+                        rq.onDone(f.error());
+
+                        ses.close();
+
+                        return;
+                    }
+
+                    addTimeoutObject(new IgniteSpiTimeoutObject() {
+                        @Override public IgniteUuid id() {
+                            return IgniteUuid.randomUuid();
+                        }
+
+                        @Override public long endTime() {
+                            return U.currentTimeMillis() + connTimeout;
+                        }
+
+                        @Override public void onTimeout() {
+                            // Close session if request not complete yet.
+                            GridFutureAdapter<Channel> rq = ses.meta(CHANNEL_FUT_META);
+
+                            assert rq != null;
+
+                            if (rq.onDone(handshakeTimeoutException()))
+                                ses.close();
+                        }
+                    });
+                });
+
+            return chFut;
+        }
+        catch (IgniteCheckedException e) {
+            throw new IgniteSpiException("Unable to create new channel connection to the remote node: " + remote, e);
+        }
+        finally {
+            connectGate.leave();
+        }
+    }
+
+    /**
+     * @param connIdx Connection index to check.
+     * @return {@code true} if connection index is related to the channel create request\response.
+     */
+    private boolean isChannelConnIdx(int connIdx) {
+        return connIdx > MAX_CONN_PER_NODE;
+    }
+
+    /**
      *
      */
     private class DiscoveryListener implements GridLocalEventListener, HighPriorityListener {
         /** {@inheritDoc} */
         @Override public void onEvent(Event evt) {
             assert evt instanceof DiscoveryEvent : evt;
-            assert evt.type() == EVT_NODE_LEFT || evt.type() == EVT_NODE_FAILED ;
+            assert evt.type() == EVT_NODE_LEFT || evt.type() == EVT_NODE_FAILED;
 
-            onNodeLeft(((DiscoveryEvent)evt).eventNode().id());
+            ClusterNode node = ((DiscoveryEvent)evt).eventNode();
+
+            onNodeLeft(node.consistentId(), node.id());
         }
 
         /** {@inheritDoc} */
@@ -4156,13 +4631,13 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                 };
 
                 IpcToNioAdapter<Message> adapter = new IpcToNioAdapter<>(
-                    metricsLsnr,
+                    metricsLsnr.metricRegistry(),
                     log,
                     endpoint,
                     srvLsnr,
                     writerFactory,
                     new GridNioCodecFilter(
-                        new GridDirectParser(log.getLogger(GridDirectParser.class),msgFactory, readerFactory),
+                        new GridDirectParser(log.getLogger(GridDirectParser.class), msgFactory, readerFactory),
                         log,
                         true),
                     new GridConnectionBytesVerifyFilter(log)
@@ -4200,18 +4675,19 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     /**
      *
      */
-    private class CommunicationWorker extends IgniteSpiThread {
+    private class CommunicationWorker extends GridWorker {
         /** */
         private final BlockingQueue<DisconnectedSessionInfo> q = new LinkedBlockingQueue<>();
 
         /**
          * @param igniteInstanceName Ignite instance name.
+         * @param log Logger.
          */
-        private CommunicationWorker(String igniteInstanceName) {
-            super(igniteInstanceName, "tcp-comm-worker", log);
+        private CommunicationWorker(String igniteInstanceName, IgniteLogger log) {
+            super(igniteInstanceName, "tcp-comm-worker", log, getWorkersRegistry(ignite));
         }
 
-        /** {@inheritDoc} */
+        /** */
         @Override protected void body() throws InterruptedException {
             if (log.isDebugEnabled())
                 log.debug("Tcp communication worker has been started.");
@@ -4219,13 +4695,24 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
             Throwable err = null;
 
             try {
-                while (!isInterrupted()) {
-                    DisconnectedSessionInfo disconnectData = q.poll(idleConnTimeout, TimeUnit.MILLISECONDS);
+                while (!isCancelled()) {
+                    DisconnectedSessionInfo disconnectData;
+
+                    blockingSectionBegin();
+
+                    try {
+                        disconnectData = q.poll(idleConnTimeout, TimeUnit.MILLISECONDS);
+                    }
+                    finally {
+                        blockingSectionEnd();
+                    }
 
                     if (disconnectData != null)
                         processDisconnect(disconnectData);
                     else
                         processIdle();
+
+                    onIdle();
                 }
             }
             catch (Throwable t) {
@@ -4235,13 +4722,16 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                 throw t;
             }
             finally {
-                if (err == null && !stopping)
-                    err = new IllegalStateException("Thread  " + getName() + " is terminated unexpectedly.");
+                if (ignite instanceof IgniteEx) {
+                    if (err == null && !stopping)
+                        err = new IllegalStateException("Thread  " + getName() + " is terminated unexpectedly.");
 
-                if (err instanceof OutOfMemoryError)
-                    ((IgniteEx)ignite).context().failure().process(new FailureContext(CRITICAL_ERROR, err));
-                else if (err != null)
-                    ((IgniteEx)ignite).context().failure().process(new FailureContext(SYSTEM_WORKER_TERMINATION, err));
+                    if (err instanceof OutOfMemoryError)
+                        ((IgniteEx)ignite).context().failure().process(new FailureContext(CRITICAL_ERROR, err));
+                    else if (err != null)
+                        ((IgniteEx)ignite).context().failure().process(
+                            new FailureContext(SYSTEM_WORKER_TERMINATION, err));
+                }
             }
         }
 
@@ -4274,7 +4764,9 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                     GridNioRecoveryDescriptor recovery = null;
 
                     if (!usePairedConnections(node) && client instanceof GridTcpNioCommunicationClient) {
-                        recovery = recoveryDescs.get(new ConnectionKey(node.id(), client.connectionIndex(), -1));
+                        recovery = recoveryDescs.get(new ConnectionKey(
+                            node.id(), client.connectionIndex(), -1)
+                        );
 
                         if (recovery != null && recovery.lastAcknowledged() != recovery.received()) {
                             RecoveryLastReceivedMessage msg = new RecoveryLastReceivedMessage(recovery.received());
@@ -4300,7 +4792,9 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
 
                     if (idleTime >= idleConnTimeout) {
                         if (recovery == null && usePairedConnections(node))
-                            recovery = outRecDescs.get(new ConnectionKey(node.id(), client.connectionIndex(), -1));
+                            recovery = outRecDescs.get(new ConnectionKey(
+                                node.id(), client.connectionIndex(), -1)
+                            );
 
                         if (recovery != null &&
                             recovery.nodeAlive(getSpiContext().node(nodeId)) &&
@@ -4421,6 +4915,11 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                 if (log.isDebugEnabled())
                     log.debug("Recovery reconnect failed, node stopping [rmtNode=" + recoveryDesc.node().id() + ']');
             }
+            catch (IgniteTooManyOpenFilesException e) {
+                onException(e.getMessage(), e);
+
+                throw e;
+            }
             catch (IgniteCheckedException | IgniteException e) {
                 try {
                     if (recoveryDesc.nodeAlive(getSpiContext().node(node.id())) && getSpiContext().pingNode(node.id())) {
@@ -4506,7 +5005,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
                 if (obj instanceof GridCommunicationClient)
                     ((GridCommunicationClient)obj).forceClose();
                 else
-                    U.closeQuiet((AbstractInterruptibleChannel)obj);
+                    U.closeQuiet((AutoCloseable)obj);
             }
         }
 
@@ -4544,7 +5043,6 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
         }
 
         /** {@inheritDoc} */
-        @SuppressWarnings("ThrowFromFinallyBlock")
         @Override public void applyx(InputStream in, OutputStream out) throws IgniteCheckedException {
             try {
                 // Handshake.
@@ -4607,7 +5105,7 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
     /**
      *
      */
-    private class ConnectGateway {
+    private static class ConnectGateway {
         /** */
         private GridSpinReadWriteLock lock = new GridSpinReadWriteLock();
 
@@ -4719,6 +5217,22 @@ public class TcpCommunicationSpi extends IgniteSpiAdapter implements Communicati
          * @return Thread connection index.
          */
         int connectionIndex();
+    }
+
+    /** */
+    private static class FirstConnectionPolicy implements ConnectionPolicy {
+        /** {@inheritDoc} */
+        @Override public int connectionIndex() {
+            return 0;
+        }
+    }
+
+    /** */
+    private class RoundRobinConnectionPolicy implements ConnectionPolicy {
+        /** {@inheritDoc} */
+        @Override public int connectionIndex() {
+            return (int)(U.safeAbs(Thread.currentThread().getId()) % connectionsPerNode);
+        }
     }
 
     /**

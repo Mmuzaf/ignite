@@ -30,7 +30,9 @@ import org.apache.ignite.internal.mem.DirectMemoryRegion;
 import org.apache.ignite.internal.util.typedef.internal.U;
 
 /**
- *
+ * Memory provider implementation based on memory mapped file.
+ * <p>
+ * Doesn't support memory reuse semantics.
  */
 public class MappedFileMemoryProvider implements DirectMemoryProvider {
     /** */
@@ -55,6 +57,9 @@ public class MappedFileMemoryProvider implements DirectMemoryProvider {
     /** */
     private List<MappedFile> mappedFiles;
 
+    /** Flag shows if current memory provider have been already initialized. */
+    private boolean isInit;
+
     /**
      * @param allocationPath Allocation path.
      */
@@ -65,6 +70,9 @@ public class MappedFileMemoryProvider implements DirectMemoryProvider {
 
     /** {@inheritDoc} */
     @Override public void initialize(long[] sizes) {
+        if (isInit)
+            throw new IgniteException("Second initialization does not allowed for current provider");
+
         this.sizes = sizes;
 
         mappedFiles = new ArrayList<>(sizes.length);
@@ -90,10 +98,12 @@ public class MappedFileMemoryProvider implements DirectMemoryProvider {
                         "opened by another process and current user has enough rights): " + file);
             }
         }
+
+        isInit = true;
     }
 
     /** {@inheritDoc} */
-    @Override public void shutdown() {
+    @Override public void shutdown(boolean deallocate) {
         if (mappedFiles != null) {
             for (MappedFile file : mappedFiles) {
                 try {

@@ -32,12 +32,12 @@ import org.apache.ignite.configuration.DataStorageConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.mem.IgniteOutOfMemoryException;
-import org.apache.ignite.internal.util.typedef.G;
 import org.apache.ignite.internal.util.typedef.X;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.apache.ignite.transactions.Transaction;
 import org.apache.ignite.transactions.TransactionConcurrency;
 import org.apache.ignite.transactions.TransactionIsolation;
+import org.junit.Test;
 
 /**
  *
@@ -62,23 +62,18 @@ public class IgniteOutOfMemoryPropagationTest extends GridCommonAbstractTest {
     private IgniteEx client;
 
     /** {@inheritDoc} */
-    @Override protected void afterTestsStopped() throws Exception {
-        stopAllGrids();
-
-        assert G.allGrids().isEmpty();
-    }
-
-    /** {@inheritDoc} */
     @Override protected long getTestTimeout() {
         return 20 * 60 * 1000;
     }
 
     /** */
+    @Test
     public void testPutOOMPropagation() throws Exception {
         testOOMPropagation(false);
     }
 
     /** */
+    @Test
     public void testStreamerOOMPropagation() throws Exception {
         testOOMPropagation(true);
     }
@@ -166,22 +161,16 @@ public class IgniteOutOfMemoryPropagationTest extends GridCommonAbstractTest {
         this.backupsCnt = backupsCnt;
         this.writeSyncMode = writeSyncMode;
 
-        Ignition.setClientMode(false);
-
         for (int i = 0; i < NODES; i++)
             startGrid(i);
 
-        Ignition.setClientMode(true);
-
-        client = startGrid(NODES + 1);
+        client = startClientGrid(NODES + 1);
 
         // it is required to start first node in test jvm, but we can not start client node,
         // because client will fail to connect and test will fail too.
         // as workaround start first server node in test jvm and then stop it.
         stopGrid(0);
     }
-
-
 
     /**
      * @param useStreamer Use streamer.
@@ -236,7 +225,7 @@ public class IgniteOutOfMemoryPropagationTest extends GridCommonAbstractTest {
         DataStorageConfiguration memCfg = new DataStorageConfiguration();
 
         memCfg.setDefaultDataRegionConfiguration(new DataRegionConfiguration()
-            .setMaxSize(10 * 1024 * 1024 + 1));
+            .setMaxSize(10L * 1024 * 1024 + 1));
 
         cfg.setDataStorageConfiguration(memCfg);
 

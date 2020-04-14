@@ -28,18 +28,14 @@ import org.apache.ignite.internal.managers.discovery.GridDiscoveryManager;
 import org.apache.ignite.internal.processors.affinity.AffinityTopologyVersion;
 import org.apache.ignite.lang.IgniteUuid;
 import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.TcpDiscoveryIpFinder;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.jetbrains.annotations.Nullable;
+import org.junit.Test;
 
 /**
  *
  */
 public class FilterDataForClientNodeDiscoveryTest extends GridCommonAbstractTest {
-    /** */
-    private static final TcpDiscoveryIpFinder IP_FINDER = new TcpDiscoveryVmIpFinder(true);
-
     /** Join servers count. */
     private int joinSrvCnt;
 
@@ -56,15 +52,16 @@ public class FilterDataForClientNodeDiscoveryTest extends GridCommonAbstractTest
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testDataBag() throws Exception {
-        startGrid(configuration(0, false));
-        startGrid(configuration(1, false));
+        startGrid(configuration(0));
+        startGrid(configuration(1));
 
         assertEquals(3, joinSrvCnt);
         assertEquals(0, joinCliCnt);
 
-        startGrid(configuration(2, true));
-        startGrid(configuration(3, true));
+        startClientGrid(configuration(2));
+        startClientGrid(configuration(3));
 
         assertEquals(5, joinSrvCnt);
         assertEquals(4, joinCliCnt);
@@ -73,11 +70,12 @@ public class FilterDataForClientNodeDiscoveryTest extends GridCommonAbstractTest
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testDiscoveryServerOnlyCustomMessage() throws Exception {
-        startGrid(configuration(0, false));
-        startGrid(configuration(1, false));
-        startGrid(configuration(2, true));
-        startGrid(configuration(3, true));
+        startGrid(configuration(0));
+        startGrid(configuration(1));
+        startClientGrid(configuration(2));
+        startClientGrid(configuration(3));
 
         final boolean [] recvMsg = new boolean[4];
 
@@ -108,23 +106,19 @@ public class FilterDataForClientNodeDiscoveryTest extends GridCommonAbstractTest
         }
     }
 
-
     /**
      * @param nodeIdx Node index.
-     * @param client Client flag.
      * @return Ignite configuration.
      * @throws Exception On error.
      */
-    private IgniteConfiguration configuration(int nodeIdx, boolean client) throws Exception {
+    private IgniteConfiguration configuration(int nodeIdx) throws Exception {
         IgniteConfiguration cfg = getConfiguration(getTestIgniteInstanceName(nodeIdx));
 
         TcpDiscoverySpi testSpi = new TestDiscoverySpi();
 
-        testSpi.setIpFinder(IP_FINDER);
+        testSpi.setIpFinder(sharedStaticIpFinder);
 
         cfg.setDiscoverySpi(testSpi);
-
-        cfg.setClientMode(client);
 
         return cfg;
     }
@@ -202,11 +196,6 @@ public class FilterDataForClientNodeDiscoveryTest extends GridCommonAbstractTest
 
         /** {@inheritDoc} */
         @Override public boolean isMutable() {
-            return false;
-        }
-
-        /** {@inheritDoc} */
-        @Override public boolean stopProcess() {
             return false;
         }
 

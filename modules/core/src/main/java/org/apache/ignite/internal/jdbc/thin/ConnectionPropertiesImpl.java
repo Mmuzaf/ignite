@@ -26,8 +26,10 @@ import java.util.StringTokenizer;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.configuration.ClientConnectorConfiguration;
 import org.apache.ignite.internal.processors.odbc.SqlStateCode;
+import org.apache.ignite.internal.processors.query.NestedTxMode;
 import org.apache.ignite.internal.util.HostAndPortRange;
 import org.apache.ignite.internal.util.typedef.F;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Holds JDBC connection properties.
@@ -99,6 +101,26 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
     private BooleanProperty skipReducerOnUpdate = new BooleanProperty(
         "skipReducerOnUpdate", "Enable execution update queries on ignite server nodes", false, false);
 
+    /** Nested transactions handling strategy. */
+    private StringProperty nestedTxMode = new StringProperty(
+        "nestedTransactionsMode", "Way to handle nested transactions", NestedTxMode.ERROR.name(),
+        new String[] { NestedTxMode.COMMIT.name(), NestedTxMode.ERROR.name(), NestedTxMode.IGNORE.name() },
+        false, new PropertyValidator() {
+        private static final long serialVersionUID = 0L;
+
+        @Override public void validate(String mode) throws SQLException {
+            if (!F.isEmpty(mode)) {
+                try {
+                    NestedTxMode.valueOf(mode.toUpperCase());
+                }
+                catch (IllegalArgumentException e) {
+                    throw new SQLException("Invalid nested transactions handling mode, allowed values: " +
+                        Arrays.toString(nestedTxMode.choices), SqlStateCode.CLIENT_CONNECTION_FAILED);
+                }
+            }
+        }
+    });
+
     /** SSL: Use SSL connection to Ignite node. */
     private StringProperty sslMode = new StringProperty("sslMode",
         "The SSL mode of the connection", SSL_MODE_DISABLE,
@@ -107,6 +129,11 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
     /** SSL: Client certificate key store url. */
     private StringProperty sslProtocol = new StringProperty("sslProtocol",
         "SSL protocol name", null, null, false, null);
+
+    /** SSL: Supported SSL cipher suites. */
+    private StringProperty sslCipherSuites = new StringProperty("sslCipherSuites",
+        "Supported SSL ciphers", null,
+        null, false, null);
 
     /** SSL: Key algorithm name. */
     private StringProperty sslKeyAlgorithm = new StringProperty("sslKeyAlgorithm",
@@ -154,6 +181,10 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
     private StringProperty sslFactory = new StringProperty("sslFactory",
         "Custom class name that implements Factory<SSLSocketFactory>", null, null, false, null);
 
+    /** Custom class name that implements Factory&lt;Map&lt;String, String&gt;&gt; which returns user attributes. */
+    private StringProperty userAttrsFactory = new StringProperty("userAttributesFactory",
+        "Custom class name that implements Factory<Map<String, String>> (user attributes)", null, null, false, null);
+
     /** User name to authenticate the client on the server side. */
     private StringProperty user = new StringProperty(
         "user", "User name to authenticate the client on the server side", null, null, false, null);
@@ -162,15 +193,63 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
     private StringProperty passwd = new StringProperty(
         "password", "User's password", null, null, false, null);
 
+    /** Data page scan flag. */
+    private BooleanProperty dataPageScanEnabled = new BooleanProperty("dataPageScanEnabled",
+        "Whether data page scan for queries is allowed. If not specified, server defines the default behaviour.",
+        null, false);
+
+    /** Partition awareness flag. */
+    private BooleanProperty partitionAwareness = new BooleanProperty(
+        "partitionAwareness",
+        "Whether jdbc thin partition awareness is enabled.",
+        false, false);
+
+    /** Update batch size (the size of internal batches are used for INSERT/UPDATE/DELETE operation). */
+    private IntegerProperty updateBatchSize = new IntegerProperty("updateBatchSize",
+        "Update bach size (the size of internal batches are used for INSERT/UPDATE/DELETE operation). " +
+            "Set to 1 to prevent deadlock on update where keys sequence are different " +
+            "in several concurrent updates.", null, false, 1, Integer.MAX_VALUE);
+
+    /** Partition awareness SQL cache size. */
+    private IntegerProperty partitionAwarenessSQLCacheSize = new IntegerProperty("partitionAwarenessSQLCacheSize",
+        "The size of sql cache that is used within partition awareness optimization.",
+        1_000, false, 1, Integer.MAX_VALUE);
+
+    /** Partition awareness partition distributions cache size. */
+    private IntegerProperty partitionAwarenessPartDistributionsCacheSize = new IntegerProperty(
+        "partitionAwarenessPartitionDistributionsCacheSize",
+        "The size of partition distributions cache that is used within partition awareness optimization.",
+        1_000, false, 1, Integer.MAX_VALUE);
+
+    /** Query timeout. */
+    private IntegerProperty qryTimeout = new IntegerProperty("queryTimeout",
+        "Sets the number of seconds the driver will wait for a <code>Statement</code> object to execute." +
+            " Zero means there is no limits.",
+        0, false, 0, Integer.MAX_VALUE);
+
+    /** JDBC connection timeout. */
+    private IntegerProperty connTimeout = new IntegerProperty("connectionTimeout",
+        "Sets the number of milliseconds JDBC client will waits for server to response." +
+            " Zero means there is no limits.",
+        0, false, 0, Integer.MAX_VALUE);
+
     /** Properties array. */
     private final ConnectionProperty [] propsArray = {
         distributedJoins, enforceJoinOrder, collocated, replicatedOnly, autoCloseServerCursor,
-        tcpNoDelay, lazy, socketSendBuffer, socketReceiveBuffer, skipReducerOnUpdate,
-        sslMode, sslProtocol, sslKeyAlgorithm,
+        tcpNoDelay, lazy, socketSendBuffer, socketReceiveBuffer, skipReducerOnUpdate, nestedTxMode,
+        sslMode, sslCipherSuites, sslProtocol, sslKeyAlgorithm,
         sslClientCertificateKeyStoreUrl, sslClientCertificateKeyStorePassword, sslClientCertificateKeyStoreType,
         sslTrustCertificateKeyStoreUrl, sslTrustCertificateKeyStorePassword, sslTrustCertificateKeyStoreType,
         sslTrustAll, sslFactory,
-        user, passwd
+        userAttrsFactory,
+        user, passwd,
+        dataPageScanEnabled,
+            partitionAwareness,
+        updateBatchSize,
+            partitionAwarenessSQLCacheSize,
+            partitionAwarenessPartDistributionsCacheSize,
+        qryTimeout,
+        connTimeout
     };
 
     /** {@inheritDoc} */
@@ -347,6 +426,16 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
     }
 
     /** {@inheritDoc} */
+    @Override public String getSslCipherSuites() {
+        return sslCipherSuites.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void setSslCipherSuites(String sslCipherSuites) {
+        this.sslCipherSuites.setValue(sslCipherSuites);
+    }
+
+    /** {@inheritDoc} */
     @Override public String getSslKeyAlgorithm() {
         return sslKeyAlgorithm.value();
     }
@@ -437,6 +526,16 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
     }
 
     /** {@inheritDoc} */
+    @Override public String nestedTxMode() {
+        return nestedTxMode.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void nestedTxMode(String val) {
+        nestedTxMode.setValue(val);
+    }
+
+    /** {@inheritDoc} */
     @Override public void setUsername(String name) {
         user.setValue(name);
     }
@@ -454,6 +553,89 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
     /** {@inheritDoc} */
     @Override public String getPassword() {
         return passwd.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public @Nullable Boolean isDataPageScanEnabled() {
+        return dataPageScanEnabled.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void setDataPageScanEnabled(@Nullable Boolean dataPageScanEnabled) {
+        this.dataPageScanEnabled.setValue(dataPageScanEnabled);
+    }
+
+    /** {@inheritDoc} */
+    @Override public boolean isPartitionAwareness() {
+        return partitionAwareness.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void setPartitionAwareness(boolean partitionAwareness) {
+        this.partitionAwareness.setValue(partitionAwareness);
+    }
+
+    /** {@inheritDoc} */
+    @Override public @Nullable Integer getUpdateBatchSize() {
+        return updateBatchSize.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void setUpdateBatchSize(@Nullable Integer updateBatchSize) throws SQLException {
+        this.updateBatchSize.setValue(updateBatchSize);
+    }
+
+    /** {@inheritDoc} */
+    @Override public int getPartitionAwarenessSqlCacheSize() {
+        return partitionAwarenessSQLCacheSize.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void setPartitionAwarenessSqlCacheSize(int partitionAwarenessSqlCacheSize)
+        throws SQLException {
+        this.partitionAwarenessSQLCacheSize.setValue(partitionAwarenessSqlCacheSize);
+    }
+
+    /** {@inheritDoc} */
+    @Override public int getPartitionAwarenessPartitionDistributionsCacheSize() {
+        return partitionAwarenessPartDistributionsCacheSize.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void setPartitionAwarenessPartitionDistributionsCacheSize(
+        int partitionAwarenessPartDistributionsCacheSize) throws SQLException {
+        this.partitionAwarenessPartDistributionsCacheSize.setValue(
+                partitionAwarenessPartDistributionsCacheSize);
+    }
+
+    /** {@inheritDoc} */
+    @Override public Integer getQueryTimeout() {
+        return qryTimeout.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void setQueryTimeout(@Nullable Integer timeout) throws SQLException {
+        qryTimeout.setValue(timeout);
+    }
+
+    /** {@inheritDoc} */
+    @Override public int getConnectionTimeout() {
+        return connTimeout.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void setConnectionTimeout(@Nullable Integer timeout) throws SQLException {
+        connTimeout.setValue(timeout);
+    }
+
+    /** {@inheritDoc} */
+    @Override public String getUserAttributesFactory() {
+        return userAttrsFactory.value();
+    }
+
+    /** {@inheritDoc} */
+    @Override public void setUserAttributesFactory(String cls) {
+        userAttrsFactory.setValue(cls);
     }
 
     /**
@@ -815,10 +997,10 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
                     SqlStateCode.CLIENT_CONNECTION_FAILED);
             }
 
-            checkChoices(strVal);
-
             if (validator != null)
                 validator.validate(strVal);
+
+            checkChoices(strVal);
 
             props.remove(name);
 
@@ -880,7 +1062,7 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
         private static final String [] boolChoices = new String[] {Boolean.TRUE.toString(), Boolean.FALSE.toString()};
 
         /** Value. */
-        private boolean val;
+        private Boolean val;
 
         /**
          * @param name Name.
@@ -888,7 +1070,7 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
          * @param dfltVal Default value.
          * @param required {@code true} if the property is required.
          */
-        BooleanProperty(String name, String desc, boolean dfltVal, boolean required) {
+        BooleanProperty(String name, String desc, @Nullable Boolean dfltVal, boolean required) {
             super(name, desc, dfltVal, boolChoices, required);
 
             val = dfltVal;
@@ -897,7 +1079,7 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
         /**
          * @return Property value.
          */
-        boolean value() {
+        @Nullable Boolean value() {
             return val;
         }
 
@@ -918,13 +1100,16 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
 
         /** {@inheritDoc} */
         @Override String valueObject() {
+            if (val == null)
+                return null;
+
             return Boolean.toString(val);
         }
 
         /**
          * @param val Property value to set.
          */
-        void setValue(boolean val) {
+        void setValue(Boolean val) {
             this.val = val;
         }
     }
@@ -953,8 +1138,6 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
         NumberProperty(String name, String desc, Number dfltVal, boolean required, Number min, Number max) {
             super(name, desc, dfltVal, null, required);
 
-            assert dfltVal != null;
-
             val = dfltVal;
 
             range = new Number[] {min, max};
@@ -963,7 +1146,7 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
         /** {@inheritDoc} */
         @Override void init(String str) throws SQLException {
             if (str == null)
-                val = (int)dfltVal;
+                val = dfltVal != null ? (Number)dfltVal : null;
             else {
                 try {
                     setValue(parse(str));
@@ -984,7 +1167,7 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
 
         /** {@inheritDoc} */
         @Override String valueObject() {
-            return String.valueOf(val);
+            return val != null ? String.valueOf(val) : null;
         }
 
         /**
@@ -1035,8 +1218,8 @@ public class ConnectionPropertiesImpl implements ConnectionProperties, Serializa
         /**
          * @return Property value.
          */
-        int value() {
-            return val.intValue();
+        Integer value() {
+            return val != null ? val.intValue() : null;
         }
     }
 

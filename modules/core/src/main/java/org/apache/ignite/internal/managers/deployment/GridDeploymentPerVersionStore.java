@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeoutException;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.configuration.DeploymentMode;
 import org.apache.ignite.events.DeploymentEvent;
@@ -278,6 +279,24 @@ public class GridDeploymentPerVersionStore extends GridDeploymentStoreAdapter {
     }
 
     /** {@inheritDoc} */
+    @Override public GridDeployment searchDeploymentCache(GridDeploymentMetadata meta) {
+        synchronized (mux) {
+            List<SharedDeployment> deps = cache.get(meta.userVersion());
+
+            if (deps != null) {
+                assert !deps.isEmpty();
+
+                for (SharedDeployment d : deps) {
+                    if (d.hasParticipant(meta.senderNodeId(), meta.classLoaderId()))
+                        return d;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** {@inheritDoc} */
     @Override @Nullable public GridDeployment getDeployment(GridDeploymentMetadata meta) {
         assert meta != null;
 
@@ -356,22 +375,14 @@ public class GridDeploymentPerVersionStore extends GridDeploymentStoreAdapter {
                     return null;
                 }
 
-                List<SharedDeployment> deps = cache.get(meta.userVersion());
+                dep = (SharedDeployment)searchDeploymentCache(meta);
 
-                if (deps != null) {
-                    assert !deps.isEmpty();
+                if (dep == null) {
+                    List<SharedDeployment> deps = cache.get(meta.userVersion());
 
-                    for (SharedDeployment d : deps) {
-                        if (d.hasParticipant(meta.senderNodeId(), meta.classLoaderId()) ||
-                            meta.senderNodeId().equals(ctx.localNodeId())) {
-                            // Done.
-                            dep = d;
+                    if (deps != null) {
+                        assert !deps.isEmpty();
 
-                            break;
-                        }
-                    }
-
-                    if (dep == null) {
                         checkRedeploy(meta);
 
                         // Find existing deployments that need to be checked
@@ -413,12 +424,12 @@ public class GridDeploymentPerVersionStore extends GridDeploymentStoreAdapter {
                             deps.add(dep);
                         }
                     }
-                }
-                else {
-                    checkRedeploy(meta);
+                    else {
+                        checkRedeploy(meta);
 
-                    // Create peer class loader.
-                    dep = createNewDeployment(meta, true);
+                        // Create peer class loader.
+                        dep = createNewDeployment(meta, true);
+                    }
                 }
             }
 
@@ -689,7 +700,7 @@ public class GridDeploymentPerVersionStore extends GridDeploymentStoreAdapter {
                 return false;
 
             // Temporary class loader.
-            ClassLoader temp = new GridDeploymentClassLoader(
+            GridDeploymentClassLoader temp = new GridDeploymentClassLoader(
                 IgniteUuid.fromUuid(ctx.localNodeId()),
                 meta.userVersion(),
                 meta.deploymentMode(),
@@ -712,7 +723,14 @@ public class GridDeploymentPerVersionStore extends GridDeploymentStoreAdapter {
             InputStream rsrcIn = null;
 
             try {
-                rsrcIn = temp.getResourceAsStream(path);
+                boolean timeout = false;
+
+                try {
+                    rsrcIn = temp.getResourceAsStreamEx(path);
+                }
+                catch (TimeoutException e) {
+                    timeout = true;
+                }
 
                 boolean found = rsrcIn != null;
 
@@ -732,7 +750,7 @@ public class GridDeploymentPerVersionStore extends GridDeploymentStoreAdapter {
 
                         return false;
                     }
-                    else
+                    else if (!timeout)
                         // Cache result if classloader is still alive.
                         ldrRsrcCache.put(clsName, found);
                 }
@@ -943,7 +961,6 @@ public class GridDeploymentPerVersionStore extends GridDeploymentStoreAdapter {
                 for (Iterator<SharedDeployment> i2 = deps.iterator(); i2.hasNext();) {
                     SharedDeployment dep = i2.next();
 
-
                     if (dep.hasName(rsrcName)) {
                         if (!dep.undeployed()) {
                             dep.undeploy();
@@ -1085,7 +1102,6 @@ public class GridDeploymentPerVersionStore extends GridDeploymentStoreAdapter {
          * @param userVer User version.
          * @param sampleClsName Sample class name.
          */
-        @SuppressWarnings({"TypeMayBeWeakened"})
         SharedDeployment(DeploymentMode depMode,
             GridDeploymentClassLoader clsLdr, IgniteUuid clsLdrId,
             String userVer, String sampleClsName) {
@@ -1190,8 +1206,6 @@ public class GridDeploymentPerVersionStore extends GridDeploymentStoreAdapter {
             assert nodeId != null;
             assert ldrId != null;
 
-            assert Thread.holdsLock(mux);
-
             return classLoader().hasRegisteredNode(nodeId, ldrId);
         }
 
@@ -1289,6 +1303,12 @@ public class GridDeploymentPerVersionStore extends GridDeploymentStoreAdapter {
                 ClassLoader ldr = classLoader();
 
                 ctx.cache().onUndeployed(ldr);
+
+               // Clear static class cache.
+                U.clearClassFromClassCache(ctx.cache().context().deploy().globalLoader(), sampleClassName());
+
+                for (String alias : deployedClassMap().keySet())
+                    U.clearClassFromClassCache(ctx.cache().context().deploy().globalLoader(), alias);
 
                 // Clear optimized marshaller's cache.
                 if (ctx.config().getMarshaller() instanceof AbstractMarshaller)

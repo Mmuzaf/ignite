@@ -27,6 +27,7 @@ import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteCluster;
 import org.apache.ignite.MemoryMetrics;
 import org.apache.ignite.PersistenceMetrics;
+import org.apache.ignite.binary.BinaryRawReader;
 import org.apache.ignite.binary.BinaryRawWriter;
 import org.apache.ignite.cluster.ClusterMetrics;
 import org.apache.ignite.cluster.ClusterNode;
@@ -48,7 +49,6 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Interop projection.
  */
-@SuppressWarnings({"UnusedDeclaration"})
 public class PlatformClusterGroup extends PlatformAbstractTarget {
     /** */
     private static final int OP_FOR_ATTRIBUTE = 2;
@@ -152,6 +152,12 @@ public class PlatformClusterGroup extends PlatformAbstractTarget {
     /** */
     private static final int OP_DATA_STORAGE_METRICS = 37;
 
+    /** */
+    private static final int OP_ENABLE_STATISTICS = 38;
+
+    /** */
+    private static final int OP_CLEAR_STATISTICS = 39;
+
     /** Projection. */
     private final ClusterGroupEx prj;
 
@@ -222,7 +228,7 @@ public class PlatformClusterGroup extends PlatformAbstractTarget {
     }
 
     /** {@inheritDoc} */
-    @SuppressWarnings({"ConstantConditions", "deprecation"})
+    @SuppressWarnings({"deprecation"})
     @Override public void processInStreamOutStream(int type, BinaryRawReaderEx reader, BinaryRawWriterEx writer)
         throws IgniteCheckedException {
         switch (type) {
@@ -344,15 +350,27 @@ public class PlatformClusterGroup extends PlatformAbstractTarget {
                 return pingNode(reader.readUuid()) ? TRUE : FALSE;
 
             case OP_RESET_LOST_PARTITIONS: {
-                int cnt = reader.readInt();
-
-                Collection<String> cacheNames = new ArrayList<>(cnt);
-
-                for (int i = 0; i < cnt; i++) {
-                    cacheNames.add(reader.readString());
-                }
+                Collection<String> cacheNames = readStrings(reader);
 
                 platformCtx.kernalContext().grid().resetLostPartitions(cacheNames);
+
+                return TRUE;
+            }
+
+            case OP_ENABLE_STATISTICS: {
+                boolean enabled = reader.readBoolean();
+
+                Collection<String> cacheNames = readStrings(reader);
+
+                platformCtx.kernalContext().grid().cluster().enableStatistics(cacheNames, enabled);
+
+                return TRUE;
+            }
+
+            case OP_CLEAR_STATISTICS:{
+                Collection<String> cacheNames = readStrings(reader);
+
+                platformCtx.kernalContext().grid().cluster().clearStatistics(cacheNames);
 
                 return TRUE;
             }
@@ -550,6 +568,7 @@ public class PlatformClusterGroup extends PlatformAbstractTarget {
 
         writer.writeString(metrics.getName());
         writer.writeLong(metrics.getTotalAllocatedPages());
+        writer.writeLong(metrics.getTotalUsedPages());
         writer.writeLong(metrics.getTotalAllocatedSize());
         writer.writeFloat(metrics.getAllocationRate());
         writer.writeFloat(metrics.getEvictionRate());
@@ -560,9 +579,15 @@ public class PlatformClusterGroup extends PlatformAbstractTarget {
         writer.writeFloat(metrics.getPagesReplaceAge());
         writer.writeLong(metrics.getPhysicalMemoryPages());
         writer.writeLong(metrics.getPhysicalMemorySize());
-        writer.writeLong(metrics.getCheckpointBufferPages());
-        writer.writeLong(metrics.getCheckpointBufferSize());
+        writer.writeLong(metrics.getUsedCheckpointBufferPages());
+        writer.writeLong(metrics.getUsedCheckpointBufferSize());
         writer.writeInt(metrics.getPageSize());
+        writer.writeLong(metrics.getCheckpointBufferSize());
+        writer.writeLong(metrics.getPagesRead());
+        writer.writeLong(metrics.getPagesWritten());
+        writer.writeLong(metrics.getPagesReplaced());
+        writer.writeLong(metrics.getOffHeapSize());
+        writer.writeLong(metrics.getOffheapUsedSize());
     }
 
     /**
@@ -612,5 +637,24 @@ public class PlatformClusterGroup extends PlatformAbstractTarget {
         writer.writeLong(metrics.getLastCheckpointTotalPagesNumber());
         writer.writeLong(metrics.getLastCheckpointDataPagesNumber());
         writer.writeLong(metrics.getLastCheckpointCopiedOnWritePagesNumber());
+    }
+
+    /**
+     * Reads collection of strings
+     *
+     * @param reader Reader.
+     */
+    private Collection<String> readStrings(BinaryRawReader reader) {
+        assert reader != null;
+
+        int cnt = reader.readInt();
+
+        Collection<String> cacheNames = new ArrayList<>(cnt);
+
+        for (int i = 0; i < cnt; i++) {
+            cacheNames.add(reader.readString());
+        }
+
+        return cacheNames;
     }
 }

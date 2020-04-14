@@ -16,7 +16,6 @@
  */
 package org.apache.ignite.internal.processors.database.baseline;
 
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.concurrent.Callable;
@@ -42,7 +41,7 @@ public class IgniteChangingBaselineCacheQueryNodeRestartSelfTest extends IgniteC
             new DataStorageConfiguration()
                 .setDefaultDataRegionConfiguration(
                     new DataRegionConfiguration()
-                        .setMaxSize(200 * 1024 * 1024)
+                        .setMaxSize(200L * 1024 * 1024)
                         .setPersistenceEnabled(true)
                 )
         );
@@ -58,6 +57,7 @@ public class IgniteChangingBaselineCacheQueryNodeRestartSelfTest extends IgniteC
 
         initStoreStrategy();
 
+        grid(0).cluster().baselineAutoAdjustEnabled(false);
         grid(0).cluster().active(true);
 
         awaitPartitionMapExchange();

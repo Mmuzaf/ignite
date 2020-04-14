@@ -27,6 +27,7 @@ import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.stream.StreamTransformer;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.apache.ignite.testframework.junits.common.GridCommonTest;
+import org.junit.Test;
 
 /** */
 @GridCommonTest(group = "P2P")
@@ -46,9 +47,6 @@ public class P2PStreamingClassLoaderTest extends GridCommonAbstractTest {
     @Override protected IgniteConfiguration getConfiguration(String igniteInstanceName) throws Exception {
         IgniteConfiguration cfg = super.getConfiguration(igniteInstanceName);
 
-        if (igniteInstanceName.startsWith("client"))
-            cfg.setClientMode(true);
-
         cfg.setDeploymentMode(depMode);
 
         return cfg;
@@ -61,7 +59,7 @@ public class P2PStreamingClassLoaderTest extends GridCommonAbstractTest {
     private void processTest() throws Exception {
         try {
             startGrid("server");
-            Ignite client = startGrid("client");
+            Ignite client = startClientGrid("client");
 
             ClassLoader ldr = getExternalClassLoader();
 
@@ -91,6 +89,7 @@ public class P2PStreamingClassLoaderTest extends GridCommonAbstractTest {
      *
      * @throws Exception if error occur.
      */
+    @Test
     public void testPrivateMode() throws Exception {
         depMode = DeploymentMode.PRIVATE;
 
@@ -102,6 +101,7 @@ public class P2PStreamingClassLoaderTest extends GridCommonAbstractTest {
      *
      * @throws Exception if error occur.
      */
+    @Test
     public void testContinuousMode() throws Exception {
         depMode = DeploymentMode.CONTINUOUS;
 
@@ -113,6 +113,7 @@ public class P2PStreamingClassLoaderTest extends GridCommonAbstractTest {
      *
      * @throws Exception if error occur.
      */
+    @Test
     public void testSharedMode() throws Exception {
         depMode = DeploymentMode.SHARED;
 

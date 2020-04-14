@@ -27,10 +27,9 @@ import org.apache.ignite.configuration.CollectionConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.TcpDiscoveryIpFinder;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
 import org.apache.ignite.testframework.GridTestUtils;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
+import org.junit.Test;
 
 /**
  *
@@ -40,31 +39,16 @@ public class GridCacheQueueClientDisconnectTest extends GridCommonAbstractTest {
     private static final String IGNITE_QUEUE_NAME = "ignite-queue-client-reconnect-test";
 
     /** */
-    private static TcpDiscoveryIpFinder ipFinder = new TcpDiscoveryVmIpFinder(true);
-
-    /** */
     private static final int FAILURE_DETECTION_TIMEOUT = 10_000;
-
-    /** */
-    private boolean clientMode;
 
     /** {@inheritDoc} */
     @Override protected IgniteConfiguration getConfiguration(String igniteInstanceName) throws Exception {
         IgniteConfiguration cfg = super.getConfiguration(igniteInstanceName);
 
-        TcpDiscoverySpi spi = new TcpDiscoverySpi();
-
-        spi.setIpFinder(ipFinder);
-
-        spi.setClientReconnectDisabled(false);
-
-        cfg.setDiscoverySpi(spi);
+        ((TcpDiscoverySpi)cfg.getDiscoverySpi()).setClientReconnectDisabled(false);
 
         cfg.setFailureDetectionTimeout(FAILURE_DETECTION_TIMEOUT);
         cfg.setClientFailureDetectionTimeout(FAILURE_DETECTION_TIMEOUT);
-
-        if (clientMode)
-            cfg.setClientMode(true);
 
         return cfg;
     }
@@ -84,13 +68,11 @@ public class GridCacheQueueClientDisconnectTest extends GridCommonAbstractTest {
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testClientDisconnect() throws Exception {
         try {
             Ignite server = startGrid(0);
-
-            clientMode = true;
-
-            Ignite client = startGrid(1);
+            Ignite client = startClientGrid(1);
 
             awaitPartitionMapExchange();
 

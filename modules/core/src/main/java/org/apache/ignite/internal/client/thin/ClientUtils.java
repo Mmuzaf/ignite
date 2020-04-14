@@ -34,6 +34,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import javax.cache.expiry.ExpiryPolicy;
 import org.apache.ignite.binary.BinaryObject;
 import org.apache.ignite.binary.BinaryRawWriter;
 import org.apache.ignite.cache.CacheAtomicityMode;
@@ -49,13 +50,23 @@ import org.apache.ignite.cache.query.SqlFieldsQuery;
 import org.apache.ignite.client.ClientCacheConfiguration;
 import org.apache.ignite.internal.binary.BinaryFieldMetadata;
 import org.apache.ignite.internal.binary.BinaryMetadata;
+import org.apache.ignite.internal.binary.BinaryObjectImpl;
 import org.apache.ignite.internal.binary.BinaryRawWriterEx;
 import org.apache.ignite.internal.binary.BinaryReaderExImpl;
+import org.apache.ignite.internal.binary.BinaryReaderHandles;
 import org.apache.ignite.internal.binary.BinarySchema;
+import org.apache.ignite.internal.binary.BinaryUtils;
 import org.apache.ignite.internal.binary.BinaryWriterExImpl;
+import org.apache.ignite.internal.binary.streams.BinaryHeapInputStream;
 import org.apache.ignite.internal.binary.streams.BinaryInputStream;
 import org.apache.ignite.internal.binary.streams.BinaryOutputStream;
-import org.apache.ignite.lang.IgniteBiTuple;
+import org.apache.ignite.internal.processors.platform.cache.expiry.PlatformExpiryPolicy;
+import org.apache.ignite.internal.util.MutableSingletonList;
+import org.apache.ignite.internal.util.typedef.internal.U;
+
+import static org.apache.ignite.internal.client.thin.ProtocolVersion.V1_2_0;
+import static org.apache.ignite.internal.client.thin.ProtocolVersion.V1_6_0;
+import static org.apache.ignite.internal.processors.platform.cache.expiry.PlatformExpiryPolicy.convertDuration;
 
 /**
  * Shared serialization/deserialization utils.
@@ -89,7 +100,7 @@ final class ClientUtils {
         Collection<E> col, BinaryOutputStream out,
         BiConsumer<BinaryOutputStream, E> elemWriter
     ) {
-        if (col == null || col.size() == 0)
+        if (col == null || col.isEmpty())
             out.writeInt(0);
         else {
             out.writeInt(col.size());
@@ -232,7 +243,7 @@ final class ClientUtils {
     }
 
     /** Serialize configuration to stream. */
-    void cacheConfiguration(ClientCacheConfiguration cfg, BinaryOutputStream out) {
+    void cacheConfiguration(ClientCacheConfiguration cfg, BinaryOutputStream out, ProtocolVersion ver) {
         try (BinaryRawWriterEx writer = new BinaryWriterExImpl(marsh.context(), out, null, null)) {
             int origPos = out.position();
 
@@ -310,8 +321,11 @@ final class ClientUtils {
                                 w.writeBoolean(qf.isKey());
                                 w.writeBoolean(qf.isNotNull());
                                 w.writeObject(qf.getDefaultValue());
-                                w.writeInt(qf.getPrecision());
-                                w.writeInt(qf.getScale());
+
+                                if (ver.compareTo(V1_2_0) >= 0) {
+                                    w.writeInt(qf.getPrecision());
+                                    w.writeInt(qf.getScale());
+                                }
                             }
                         );
                         ClientUtils.collection(
@@ -338,13 +352,32 @@ final class ClientUtils {
                 )
             );
 
+            if (ver.compareTo(V1_6_0) >= 0) {
+                itemWriter.accept(CfgItem.EXPIRE_POLICY, w -> {
+                    ExpiryPolicy expiryPlc = cfg.getExpiryPolicy();
+                    if (expiryPlc == null)
+                        w.writeBoolean(false);
+                    else {
+                        w.writeBoolean(true);
+                        w.writeLong(convertDuration(expiryPlc.getExpiryForCreation()));
+                        w.writeLong(convertDuration(expiryPlc.getExpiryForUpdate()));
+                        w.writeLong(convertDuration(expiryPlc.getExpiryForAccess()));
+                    }
+                });
+            }
+            else if (cfg.getExpiryPolicy() != null) {
+                throw new ClientProtocolError(String.format("Expire policies have not supported by the server " +
+                    "version %s, required version %s", ver, V1_6_0));
+            }
+
             writer.writeInt(origPos, out.position() - origPos - 4); // configuration length
             writer.writeInt(origPos + 4, propCnt.get()); // properties count
         }
     }
 
     /** Deserialize configuration from stream. */
-    ClientCacheConfiguration cacheConfiguration(BinaryInputStream in) throws IOException {
+    ClientCacheConfiguration cacheConfiguration(BinaryInputStream in, ProtocolVersion ver)
+        throws IOException {
         try (BinaryReaderExImpl reader = new BinaryReaderExImpl(marsh.context(), in, null, true)) {
             reader.readInt(); // Do not need length to read data. The protocol defines fixed configuration layout.
 
@@ -388,17 +421,27 @@ final class ClientUtils {
                             .setKeyFieldName(reader.readString())
                             .setValueFieldName(reader.readString());
 
+                        boolean isCliVer1_2 = ver.compareTo(V1_2_0) >= 0;
+
                         Collection<QueryField> qryFields = ClientUtils.collection(
                             in,
-                            unused2 -> new QueryField(
-                                reader.readString(),
-                                reader.readString(),
-                                reader.readBoolean(),
-                                reader.readBoolean(),
-                                reader.readObject(),
-                                reader.readInt(),
-                                reader.readInt()
-                            )
+                            unused2 -> {
+                                String name = reader.readString();
+                                String typeName = reader.readString();
+                                boolean isKey = reader.readBoolean();
+                                boolean isNotNull = reader.readBoolean(); 
+                                Object dfltVal = reader.readObject();
+                                int precision = isCliVer1_2 ? reader.readInt() : -1;
+                                int scale = isCliVer1_2 ? reader.readInt() : -1; 
+
+                                return new QueryField(name,
+                                    typeName,
+                                    isKey,
+                                    isNotNull,
+                                    dfltVal,
+                                    precision,
+                                    scale);
+                            }
                         );
 
                         return qryEntity
@@ -418,6 +461,14 @@ final class ClientUtils {
                             .setDefaultFieldValues(qryFields.stream()
                                 .filter(f -> f.getDefaultValue() != null)
                                 .collect(Collectors.toMap(QueryField::getName, QueryField::getDefaultValue))
+                            )
+                            .setFieldsPrecision(qryFields.stream()
+                                .filter(f -> f.getPrecision() != -1)
+                                .collect(Collectors.toMap(QueryField::getName, QueryField::getPrecision))
+                            )
+                            .setFieldsScale(qryFields.stream()
+                                .filter(f -> f.getScale() != -1)
+                                .collect(Collectors.toMap(QueryField::getName, QueryField::getScale))
                             )
                             .setAliases(ClientUtils.collection(
                                 in,
@@ -444,7 +495,11 @@ final class ClientUtils {
                                 }
                             ));
                     }
-                ).toArray(new QueryEntity[0]));
+                ).toArray(new QueryEntity[0]))
+                .setExpiryPolicy(
+                    ver.compareTo(V1_6_0) < 0 ? null : reader.readBoolean() ?
+                        new PlatformExpiryPolicy(reader.readLong(), reader.readLong(), reader.readLong()) : null
+                );
         }
     }
 
@@ -472,14 +527,74 @@ final class ClientUtils {
     }
 
     /** Read Ignite binary object from input stream. */
-    @SuppressWarnings("unchecked")
     <T> T readObject(BinaryInputStream in, boolean keepBinary) {
-        Object val = marsh.unmarshal(in);
+        if (keepBinary)
+            return (T)marsh.unmarshal(in);
+        else {
+            BinaryReaderHandles hnds = new BinaryReaderHandles();
 
-        if (val instanceof BinaryObject && !keepBinary)
-            val = ((BinaryObject)val).deserialize();
+            return (T)unwrapBinary(marsh.deserialize(in, hnds), hnds);
+        }
+    }
 
-        return (T)val;
+    /**
+     * Unwrap binary object.
+     */
+    private Object unwrapBinary(Object obj, BinaryReaderHandles hnds) {
+        if (obj instanceof BinaryObjectImpl) {
+            BinaryObjectImpl obj0 = (BinaryObjectImpl)obj;
+
+            return marsh.deserialize(BinaryHeapInputStream.create(obj0.array(), obj0.start()), hnds);
+        }
+        else if (obj instanceof BinaryObject)
+            return ((BinaryObject)obj).deserialize();
+        else if (BinaryUtils.knownCollection(obj))
+            return unwrapCollection((Collection<Object>)obj, hnds);
+        else if (BinaryUtils.knownMap(obj))
+            return unwrapMap((Map<Object, Object>)obj, hnds);
+        else if (obj instanceof Object[])
+            return unwrapArray((Object[])obj, hnds);
+        else
+            return obj;
+    }
+
+    /**
+     * Unwrap collection with binary objects.
+     */
+    private Collection<Object> unwrapCollection(Collection<Object> col, BinaryReaderHandles hnds) {
+        Collection<Object> col0 = BinaryUtils.newKnownCollection(col);
+
+        for (Object obj0 : col)
+            col0.add(unwrapBinary(obj0, hnds));
+
+        return (col0 instanceof MutableSingletonList) ? U.convertToSingletonList(col0) : col0;
+    }
+
+    /**
+     * Unwrap map with binary objects.
+     */
+    private Map<Object, Object> unwrapMap(Map<Object, Object> map, BinaryReaderHandles hnds) {
+        Map<Object, Object> map0 = BinaryUtils.newMap(map);
+
+        for (Map.Entry<Object, Object> e : map.entrySet())
+            map0.put(unwrapBinary(e.getKey(), hnds), unwrapBinary(e.getValue(), hnds));
+
+        return map0;
+    }
+
+    /**
+     * Unwrap array with binary objects.
+     */
+    private Object[] unwrapArray(Object[] arr, BinaryReaderHandles hnds) {
+        if (BinaryUtils.knownArray(arr))
+            return arr;
+
+        Object[] res = new Object[arr.length];
+
+        for (int i = 0; i < arr.length; i++)
+            res[i] = unwrapBinary(arr[i], hnds);
+
+        return res;
     }
 
     /** A helper class to translate query fields. */
@@ -513,16 +628,14 @@ final class ClientUtils {
             Set<String> keys = e.getKeyFields();
             Set<String> notNulls = e.getNotNullFields();
             Map<String, Object> dflts = e.getDefaultFieldValues();
-            Map<String, IgniteBiTuple<Integer, Integer>> decimalInfo = e.getDecimalInfo();
+            Map<String, Integer> fldsPrecision = e.getFieldsPrecision();
+            Map<String, Integer> fldsScale = e.getFieldsScale();
 
             isKey = keys != null && keys.contains(name);
             isNotNull = notNulls != null && notNulls.contains(name);
             dfltVal = dflts == null ? null : dflts.get(name);
-
-            IgniteBiTuple<Integer, Integer> precisionAndScale = decimalInfo == null ? null : decimalInfo.get(name);
-
-            precision = precisionAndScale == null? -1 : precisionAndScale.get1();
-            scale = precisionAndScale == null? -1 : precisionAndScale.get2();
+            precision = fldsPrecision == null ? -1 : fldsPrecision.getOrDefault(name, -1);
+            scale = fldsScale == null? -1 : fldsScale.getOrDefault(name, -1);
         }
 
         /** Deserialization constructor. */
@@ -618,7 +731,8 @@ final class ClientUtils {
         /** Sql index max inline size. */SQL_IDX_MAX_INLINE_SIZE(204),
         /** Sql schema. */SQL_SCHEMA(203),
         /** Key configs. */KEY_CONFIGS(401),
-        /** Key entities. */QUERY_ENTITIES(200);
+        /** Key entities. */QUERY_ENTITIES(200),
+        /** Expire policy. */EXPIRE_POLICY(407);
 
         /** Code. */
         private final short code;

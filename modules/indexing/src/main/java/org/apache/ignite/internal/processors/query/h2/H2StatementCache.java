@@ -21,48 +21,53 @@ import java.sql.PreparedStatement;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.apache.ignite.internal.util.typedef.internal.U;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Statement cache.
+ * Statement cache. LRU eviction policy is used. Not thread-safe.
  */
-class H2StatementCache extends LinkedHashMap<H2CachedStatementKey, PreparedStatement> {
-    /** */
-    private int size;
-
+public final class H2StatementCache {
     /** Last usage. */
     private volatile long lastUsage;
 
+    /** */
+    private final LinkedHashMap<H2CachedStatementKey, PreparedStatement> lruStmtCache;
+
     /**
-     * @param size Size.
+     * @param size Maximum number of statements this cache can store.
      */
     H2StatementCache(int size) {
-        super(size, (float)0.75, true);
+        lruStmtCache = new LinkedHashMap<H2CachedStatementKey, PreparedStatement>(size, .75f, true) {
+            @Override protected boolean removeEldestEntry(Map.Entry<H2CachedStatementKey, PreparedStatement> eldest) {
+                if (size() <= size)
+                    return false;
 
-        this.size = size;
-    }
+                U.closeQuiet(eldest.getValue());
 
-    /** {@inheritDoc} */
-    @Override protected boolean removeEldestEntry(Map.Entry<H2CachedStatementKey, PreparedStatement> eldest) {
-        boolean rmv = size() > size;
-
-        if (rmv) {
-            PreparedStatement stmt = eldest.getValue();
-
-            U.closeQuiet(stmt);
-        }
-
-        return rmv;
+                return true;
+            }
+        };
     }
 
     /**
-     * Get statement for given schema and SQL.
-     * @param schemaName Schema name.
-     * @param sql SQL statement.
-     * @return Cached {@link PreparedStatement}, or {@code null} if none found.
+     * Caches a statement.
+     *
+     * @param key Key associated with statement.
+     * @param stmt Statement which will be cached.
      */
-    @Nullable public PreparedStatement get(String schemaName, String sql) {
-        return get(new H2CachedStatementKey(schemaName, sql));
+    void put(H2CachedStatementKey key, @NotNull PreparedStatement stmt) {
+        lruStmtCache.put(key, stmt);
+    }
+
+    /**
+     * Retrieves cached statement.
+     *
+     * @param key Key for a statement.
+     * @return Statement associated with a key.
+     */
+    @Nullable PreparedStatement get(H2CachedStatementKey key) {
+        return lruStmtCache.get(key);
     }
 
     /**
@@ -70,24 +75,43 @@ class H2StatementCache extends LinkedHashMap<H2CachedStatementKey, PreparedState
      *
      * @return last usage timestamp
      */
-    public long lastUsage() {
+    long lastUsage() {
         return lastUsage;
     }
 
     /**
      * Updates the {@link #lastUsage} timestamp by current time.
      */
-    public void updateLastUsage() {
+    void updateLastUsage() {
         lastUsage = U.currentTimeMillis();
     }
 
     /**
      * Remove statement for given schema and SQL.
+     *
      * @param schemaName Schema name.
      * @param sql SQL statement.
-     * @return Cached {@link PreparedStatement}, or {@code null} if none found.
      */
-    @Nullable public PreparedStatement remove(String schemaName, String sql) {
-        return remove(new H2CachedStatementKey(schemaName, sql));
+    void remove(String schemaName, String sql, byte qryFlags) {
+        lruStmtCache.remove(new H2CachedStatementKey(schemaName, sql, qryFlags));
+    }
+
+    /**
+     * @return Cache size.
+     */
+    int size() {
+        return lruStmtCache.size();
+    }
+
+    /** */
+    public static byte queryFlags(QueryDescriptor qryDesc) {
+        assert qryDesc != null;
+
+        return queryFlags(qryDesc.distributedJoins(), qryDesc.enforceJoinOrder());
+    }
+
+    /** */
+    public static byte queryFlags(boolean distributedJoins, boolean enforceJoinOrder) {
+        return (byte)((distributedJoins ? 1 : 0) + (enforceJoinOrder ? 2 : 0));
     }
 }

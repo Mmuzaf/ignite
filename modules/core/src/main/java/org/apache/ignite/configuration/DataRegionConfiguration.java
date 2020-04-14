@@ -21,6 +21,7 @@ import org.apache.ignite.DataRegionMetrics;
 import org.apache.ignite.internal.mem.IgniteOutOfMemoryException;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.mxbean.DataRegionMetricsMXBean;
+import org.apache.ignite.mxbean.MetricsMxBean;
 
 import static org.apache.ignite.configuration.DataStorageConfiguration.DFLT_DATA_REG_DEFAULT_NAME;
 
@@ -39,8 +40,8 @@ import static org.apache.ignite.configuration.DataStorageConfiguration.DFLT_DATA
  *             <property name="defaultRegionConfiguration">
  *                 <bean class="org.apache.ignite.configuration.DataRegionConfiguration">
  *                     <property name="name" value="Default_Region"/>
- *                     <property name="initialSize" value="#{100 * 1024 * 1024}"/>
- *                     <property name="maxSize" value="#{5 * 1024 * 102 * 1024}"/>
+ *                     <property name="initialSize" value="#{100L * 1024 * 1024}"/>
+ *                     <property name="maxSize" value="#{5L * 1024 * 1024 * 1024}"/>
  *                 </bean>
  *             </property>
  *
@@ -50,14 +51,14 @@ import static org.apache.ignite.configuration.DataStorageConfiguration.DFLT_DATA
  *                 <list>
  *                      <bean class="org.apache.ignite.configuration.DataRegionConfiguration">
  *                          <property name="name" value="20MB_Region_Eviction"/>
- *                          <property name="initialSize" value="#{20 * 1024 * 1024}"/>
+ *                          <property name="initialSize" value="#{20L * 1024 * 1024}"/>
  *                          <property name="pageEvictionMode" value="RANDOM_2_LRU"/>
  *                      </bean>
  *
  *                      <bean class="org.apache.ignite.configuration.DataRegionConfiguration">
  *                          <property name="name" value="25MB_Region_Swapping"/>
- *                          <property name="initialSize" value="#{25 * 1024 * 1024}"/>
- *                          <property name="maxSize" value="#{100 * 1024 * 1024}"/>
+ *                          <property name="initialSize" value="#{25L * 1024 * 1024}"/>
+ *                          <property name="maxSize" value="#{100L * 1024 * 1024}"/>
  *                          <property name="swapPath" value="db/swap"/>
  *                      </bean>
  *                  </list>
@@ -132,6 +133,14 @@ public final class DataRegionConfiguration implements Serializable {
 
     /** Temporary buffer size for checkpoints in bytes. */
     private long checkpointPageBufSize;
+
+    /**
+     * If {@code true}, memory for {@code DataRegion} will be allocated only on the creation of the first cache
+     * belonged to this {@code DataRegion}.
+     *
+     * Default is {@code true}.
+     */
+    private boolean lazyMemoryAllocation = true;
 
     /**
      * Gets data region name.
@@ -354,7 +363,9 @@ public final class DataRegionConfiguration implements Serializable {
      * will return average allocation rate (pages per second) for the last minute.
      *
      * @return Time interval over which allocation rate is calculated.
+     * @deprecated Use {@link MetricsMxBean#configureHitRateMetric(String, long)} instead.
      */
+    @Deprecated
     public long getMetricsRateTimeInterval() {
         return metricsRateTimeInterval;
     }
@@ -369,7 +380,9 @@ public final class DataRegionConfiguration implements Serializable {
      *
      * @param metricsRateTimeInterval Time interval used for allocation and eviction rates calculations.
      * @return {@code this} for chaining.
+     * @deprecated Use {@link MetricsMxBean#configureHitRateMetric(String, long)} instead.
      */
+    @Deprecated
     public DataRegionConfiguration setMetricsRateTimeInterval(long metricsRateTimeInterval) {
         this.metricsRateTimeInterval = metricsRateTimeInterval;
 
@@ -386,7 +399,9 @@ public final class DataRegionConfiguration implements Serializable {
      * calculation overhead.
      *
      * @return number of sub intervals.
+     * @deprecated Use {@link MetricsMxBean#configureHitRateMetric(String, long)} instead.
      */
+    @Deprecated
     public int getMetricsSubIntervalCount() {
         return metricsSubIntervalCount;
     }
@@ -401,7 +416,9 @@ public final class DataRegionConfiguration implements Serializable {
      *
      * @param metricsSubIntervalCnt A number of sub-intervals.
      * @return {@code this} for chaining.
+     * @deprecated Use {@link MetricsMxBean#configureHitRateMetric(String, long)} instead.
      */
+    @Deprecated
     public DataRegionConfiguration setMetricsSubIntervalCount(int metricsSubIntervalCnt) {
         this.metricsSubIntervalCount = metricsSubIntervalCnt;
 
@@ -429,6 +446,29 @@ public final class DataRegionConfiguration implements Serializable {
      */
     public DataRegionConfiguration setCheckpointPageBufferSize(long checkpointPageBufSize) {
         this.checkpointPageBufSize = checkpointPageBufSize;
+
+        return this;
+    }
+
+    /**
+     * @return {@code True} if memory for {@code DataRegion} will be allocated only on the creation of the first cache
+     * belonged to this {@code DataRegion}.
+     */
+    public boolean isLazyMemoryAllocation() {
+        return lazyMemoryAllocation;
+    }
+
+    /**
+     * Sets {@code lazyMemoryAllocation} flag value.
+     *
+     * If {@code true}, memory for {@code DataRegion} will be allocated only on the creation of the first cache
+     * belonged to this {@code DataRegion}.
+     *
+     * @param lazyMemoryAllocation Flag value.
+     * @return {@code this} for chaining.
+     */
+    public DataRegionConfiguration setLazyMemoryAllocation(boolean lazyMemoryAllocation) {
+        this.lazyMemoryAllocation = lazyMemoryAllocation;
 
         return this;
     }

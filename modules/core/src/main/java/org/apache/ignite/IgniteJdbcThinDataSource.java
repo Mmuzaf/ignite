@@ -63,7 +63,6 @@ public class IgniteJdbcThinDataSource implements DataSource, Serializable {
     }
 
     /** {@inheritDoc} */
-    @SuppressWarnings("unchecked")
     @Override public <T> T unwrap(Class<T> iface) throws SQLException {
         if (!isWrapperFor(iface))
             throw new SQLException("DataSource is not a wrapper for " + iface.getName());
@@ -384,6 +383,26 @@ public class IgniteJdbcThinDataSource implements DataSource, Serializable {
      */
     public void setSslProtocol(String sslProtocol) {
         props.setSslProtocol(sslProtocol);
+    }
+
+    /**
+     * Gets cipher suites.
+     *
+     * @return SSL cipher suites.
+     */
+    public String getCipherSuites() {
+        return props.getSslCipherSuites();
+    }
+
+    /**
+     * Override default cipher suites.
+     *
+     * <p>See more at JSSE Reference Guide.
+     *
+     * @param cipherSuites SSL cipher suites.
+     */
+    public void setCipherSuites(String cipherSuites) {
+        props.setSslCipherSuites(cipherSuites);
     }
 
     /**

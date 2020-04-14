@@ -20,8 +20,7 @@ package org.apache.ignite.spi.discovery.tcp;
 import java.util.Map;
 import java.util.UUID;
 import org.apache.ignite.mxbean.MXBeanDescription;
-import org.apache.ignite.mxbean.MXBeanParametersDescriptions;
-import org.apache.ignite.mxbean.MXBeanParametersNames;
+import org.apache.ignite.mxbean.MXBeanParameter;
 import org.apache.ignite.spi.IgniteSpiManagementMBean;
 import org.apache.ignite.spi.discovery.DiscoverySpiMBean;
 import org.jetbrains.annotations.Nullable;
@@ -54,6 +53,14 @@ public interface TcpDiscoverySpiMBean extends IgniteSpiManagementMBean, Discover
      */
     @MXBeanDescription("Reconnect count.")
     public int getReconnectCount();
+
+    /**
+     * Gets connection check interval in ms.
+     *
+     * @return Connection check interval.
+     */
+    @MXBeanDescription("Connection check interval.")
+    public long getConnectionCheckInterval();
 
     /**
      * Gets network timeout.
@@ -270,15 +277,22 @@ public interface TcpDiscoverySpiMBean extends IgniteSpiManagementMBean, Discover
      * @param maxHops Maximum hops for the message (3 * TOTAL_NODE_CNT is recommended).
      */
     @MXBeanDescription("Check ring latency.")
-    @MXBeanParametersNames(
-        {
-            "maxHops"
-        }
-    )
-    @MXBeanParametersDescriptions(
-        {
-            "Maximum hops for the message (3 * TOTAL_NODE_CNT is recommended)."
-        }
-    )
-    public void checkRingLatency(int maxHops);
+    public void checkRingLatency(
+        @MXBeanParameter(name = "maxHops",
+            description = "Maximum hops for the message (3 * TOTAL_NODE_CNT is recommended).") int maxHops
+    );
+
+    /**
+     * Current topology version.
+     *
+     * @return current topVer.
+     */
+    @MXBeanDescription("Get current topology version.")
+    public long getCurrentTopologyVersion();
+
+    /**
+     * Dumps ring structure to log.
+     */
+    @MXBeanDescription("Dumps ring structure to log.")
+    public void dumpRingStructure();
 }

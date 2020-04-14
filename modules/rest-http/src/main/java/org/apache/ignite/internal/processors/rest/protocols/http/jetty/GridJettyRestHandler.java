@@ -17,6 +17,8 @@
 
 package org.apache.ignite.internal.processors.rest.protocols.http.jetty;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -26,9 +28,11 @@ import java.io.LineNumberReader;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.cert.X509Certificate;
 import java.sql.Date;
 import java.sql.Time;
 import java.sql.Timestamp;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -39,17 +43,21 @@ import javax.servlet.ServletOutputStream;
 import javax.servlet.ServletRequest;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteLogger;
+import org.apache.ignite.IgniteSystemProperties;
 import org.apache.ignite.cache.CacheWriteSynchronizationMode;
+import org.apache.ignite.cluster.ClusterState;
 import org.apache.ignite.internal.processors.cache.CacheConfigurationOverride;
 import org.apache.ignite.internal.processors.rest.GridRestCommand;
 import org.apache.ignite.internal.processors.rest.GridRestProtocolHandler;
 import org.apache.ignite.internal.processors.rest.GridRestResponse;
 import org.apache.ignite.internal.processors.rest.request.DataStructuresRequest;
+import org.apache.ignite.internal.processors.rest.request.GridRestBaselineRequest;
 import org.apache.ignite.internal.processors.rest.request.GridRestCacheRequest;
 import org.apache.ignite.internal.processors.rest.request.GridRestChangeStateRequest;
+import org.apache.ignite.internal.processors.rest.request.GridRestClusterNameRequest;
+import org.apache.ignite.internal.processors.rest.request.GridRestClusterStateRequest;
 import org.apache.ignite.internal.processors.rest.request.GridRestLogRequest;
 import org.apache.ignite.internal.processors.rest.request.GridRestRequest;
 import org.apache.ignite.internal.processors.rest.request.GridRestTaskRequest;
@@ -58,24 +66,26 @@ import org.apache.ignite.internal.processors.rest.request.RestQueryRequest;
 import org.apache.ignite.internal.processors.rest.request.RestUserActionRequest;
 import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.internal.util.typedef.internal.U;
+import org.apache.ignite.lang.IgniteBiTuple;
 import org.apache.ignite.lang.IgniteClosure;
 import org.apache.ignite.lang.IgniteUuid;
 import org.apache.ignite.plugin.security.SecurityCredentials;
-
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.handler.AbstractHandler;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jetbrains.annotations.Nullable;
 
+import static java.lang.String.format;
+import static org.apache.ignite.IgniteSystemProperties.IGNITE_REST_GETALL_AS_ARRAY;
 import static org.apache.ignite.internal.client.GridClientCacheFlag.KEEP_BINARIES_MASK;
 import static org.apache.ignite.internal.processors.rest.GridRestCommand.CACHE_CONTAINS_KEYS;
 import static org.apache.ignite.internal.processors.rest.GridRestCommand.CACHE_GET_ALL;
 import static org.apache.ignite.internal.processors.rest.GridRestCommand.CACHE_PUT_ALL;
 import static org.apache.ignite.internal.processors.rest.GridRestCommand.CACHE_REMOVE_ALL;
-import static org.apache.ignite.internal.processors.rest.GridRestCommand.EXECUTE_SQL_QUERY;
+import static org.apache.ignite.internal.processors.rest.GridRestCommand.CLUSTER_ACTIVATE;
 import static org.apache.ignite.internal.processors.rest.GridRestCommand.CLUSTER_ACTIVE;
 import static org.apache.ignite.internal.processors.rest.GridRestCommand.CLUSTER_CURRENT_STATE;
+import static org.apache.ignite.internal.processors.rest.GridRestCommand.CLUSTER_STATE;
+import static org.apache.ignite.internal.processors.rest.GridRestCommand.EXECUTE_SQL_QUERY;
 import static org.apache.ignite.internal.processors.rest.GridRestResponse.STATUS_FAILED;
 
 /**
@@ -86,13 +96,16 @@ public class GridJettyRestHandler extends AbstractHandler {
     private static final String CHARSET = StandardCharsets.UTF_8.name();
 
     /** */
-    private static final String  USER_PARAM = "user";
+    private static final String FAILED_TO_PARSE_FORMAT = "Failed to parse parameter of %s type [%s=%s]";
 
     /** */
-    private static final String  PWD_PARAM = "password";
+    private static final String USER_PARAM = "user";
 
     /** */
-    private static final String  CACHE_NAME_PARAM = "cacheName";
+    private static final String PWD_PARAM = "password";
+
+    /** */
+    private static final String CACHE_NAME_PARAM = "cacheName";
 
     /** */
     private static final String BACKUPS_PARAM = "backups";
@@ -106,14 +119,14 @@ public class GridJettyRestHandler extends AbstractHandler {
     /** */
     private static final String WRITE_SYNCHRONIZATION_MODE_PARAM = "writeSynchronizationMode";
 
-    /**@deprecated Should be replaced with AUTHENTICATION + token in IGNITE 3.0 */
+    /** @deprecated Should be replaced with AUTHENTICATION + token in IGNITE 3.0 */
     private static final String IGNITE_LOGIN = "ignite.login";
 
-    /**@deprecated Should be replaced with AUTHENTICATION + token in IGNITE 3.0 */
+    /** @deprecated Should be replaced with AUTHENTICATION + token in IGNITE 3.0 */
     private static final String IGNITE_PASSWORD = "ignite.password";
 
     /** */
-    private static final String  TEMPLATE_NAME_PARAM = "templateName";
+    private static final String TEMPLATE_NAME_PARAM = "templateName";
 
     /** */
     private static final NullOutputStream NULL_OUTPUT_STREAM = new NullOutputStream();
@@ -135,6 +148,9 @@ public class GridJettyRestHandler extends AbstractHandler {
 
     /** Mapper from Java object to JSON. */
     private final ObjectMapper jsonMapper;
+
+    /** */
+    private final boolean getAllAsArray = IgniteSystemProperties.getBoolean(IGNITE_REST_GETALL_AS_ARRAY);
 
     /**
      * Creates new HTTP requests handler.
@@ -193,8 +209,24 @@ public class GridJettyRestHandler extends AbstractHandler {
             return val == null ? dfltVal : Long.valueOf(val);
         }
         catch (NumberFormatException ignore) {
-            throw new IgniteCheckedException("Failed to parse parameter of Long type [" + key + "=" + val + "]");
+            throw new IgniteCheckedException(format(FAILED_TO_PARSE_FORMAT, "Long", key, val));
         }
+    }
+
+    /**
+     * Retrieves boolean value from parameters map.
+     *
+     * @param key Key.
+     * @param params Parameters map.
+     * @param dfltVal Default value.
+     * @return Boolean value from parameters map or {@code dfltVal} if null or not exists.
+     */
+    private static boolean booleanValue(String key, Map<String, Object> params, boolean dfltVal) {
+        assert key != null;
+
+        String val = (String)params.get(key);
+
+        return val == null ? dfltVal : Boolean.parseBoolean(val);
     }
 
     /**
@@ -215,7 +247,28 @@ public class GridJettyRestHandler extends AbstractHandler {
             return val == null ? dfltVal : Integer.parseInt(val);
         }
         catch (NumberFormatException ignore) {
-            throw new IgniteCheckedException("Failed to parse parameter of Integer type [" + key + "=" + val + "]");
+            throw new IgniteCheckedException(format(FAILED_TO_PARSE_FORMAT, "Integer", key, val));
+        }
+    }
+
+    private static <T extends Enum<T>> @Nullable T enumValue(
+        String key,
+        Map<String, Object> params,
+        Class<T> enumClass
+    ) throws IgniteCheckedException {
+        assert key != null;
+        assert enumClass != null;
+
+        String val = (String)params.get(key);
+
+        if (val == null)
+            return null;
+
+        try {
+            return Enum.valueOf(enumClass, val);
+        }
+        catch (IllegalArgumentException e) {
+            throw new IgniteCheckedException(format(FAILED_TO_PARSE_FORMAT, enumClass.getSimpleName(), key, val), e);
         }
     }
 
@@ -236,7 +289,7 @@ public class GridJettyRestHandler extends AbstractHandler {
             return val == null ? null : UUID.fromString(val);
         }
         catch (NumberFormatException ignore) {
-            throw new IgniteCheckedException("Failed to parse parameter of UUID type [" + key + "=" + val + "]");
+            throw new IgniteCheckedException(format(FAILED_TO_PARSE_FORMAT, "UUID", key, val));
         }
     }
 
@@ -391,6 +444,15 @@ public class GridJettyRestHandler extends AbstractHandler {
             if (cmdRes == null)
                 throw new IllegalStateException("Received null result from handler: " + hnd);
 
+            if (getAllAsArray && cmd == GridRestCommand.CACHE_GET_ALL) {
+                List<Object> resKeyValue = new ArrayList<>();
+
+                for (Map.Entry<Object, Object> me : ((Map<Object, Object>)cmdRes.getResponse()).entrySet())
+                    resKeyValue.add(new IgniteBiTuple<>(me.getKey(), me.getValue()));
+
+                cmdRes.setResponse(resKeyValue);
+            }
+
             byte[] sesTok = cmdRes.sessionTokenBytes();
 
             if (sesTok != null)
@@ -409,7 +471,7 @@ public class GridJettyRestHandler extends AbstractHandler {
             cmdRes = new GridRestResponse(STATUS_FAILED, e.getMessage());
         }
 
-        try(ServletOutputStream os = res.getOutputStream()) {
+        try (ServletOutputStream os = res.getOutputStream()) {
             try {
                 // Try serialize.
                 jsonMapper.writeValue(NULL_OUTPUT_STREAM, cmdRes);
@@ -514,8 +576,11 @@ public class GridJettyRestHandler extends AbstractHandler {
      * @return REST request.
      * @throws IgniteCheckedException If creation failed.
      */
-    @Nullable private GridRestRequest createRequest(GridRestCommand cmd,
-        Map<String, Object> params, HttpServletRequest req) throws IgniteCheckedException {
+    @Nullable private GridRestRequest createRequest(
+        GridRestCommand cmd,
+        Map<String, Object> params,
+        HttpServletRequest req
+    ) throws IgniteCheckedException {
         GridRestRequest restReq;
 
         switch (cmd) {
@@ -618,6 +683,7 @@ public class GridJettyRestHandler extends AbstractHandler {
             case CACHE_CAS:
             case CACHE_METRICS:
             case CACHE_SIZE:
+            case CACHE_UPDATE_TLL:
             case CACHE_METADATA:
             case CACHE_REPLACE:
             case CACHE_APPEND:
@@ -674,6 +740,9 @@ public class GridJettyRestHandler extends AbstractHandler {
                 restReq0.includeMetrics(Boolean.parseBoolean((String)params.get("mtr")));
                 restReq0.includeAttributes(Boolean.parseBoolean((String)params.get("attr")));
 
+                String caches = (String)params.get("caches");
+                restReq0.includeCaches(caches == null || Boolean.parseBoolean(caches));
+
                 restReq0.nodeIp((String)params.get("ip"));
 
                 restReq0.nodeId(uuidValue("id", params));
@@ -715,6 +784,8 @@ public class GridJettyRestHandler extends AbstractHandler {
                 break;
             }
 
+            case DATA_REGION_METRICS:
+            case DATA_STORAGE_METRICS:
             case NAME:
             case VERSION: {
                 restReq = new GridRestRequest();
@@ -724,13 +795,58 @@ public class GridJettyRestHandler extends AbstractHandler {
 
             case CLUSTER_ACTIVE:
             case CLUSTER_INACTIVE:
+            case CLUSTER_ACTIVATE:
+            case CLUSTER_DEACTIVATE:
             case CLUSTER_CURRENT_STATE: {
                 GridRestChangeStateRequest restReq0 = new GridRestChangeStateRequest();
 
                 if (cmd == CLUSTER_CURRENT_STATE)
                     restReq0.reqCurrentState();
+                else if (cmd == CLUSTER_ACTIVE || cmd == CLUSTER_ACTIVATE)
+                    restReq0.active(true);
                 else
-                    restReq0.active(cmd == CLUSTER_ACTIVE);
+                    restReq0.active(false);
+
+                restReq0.forceDeactivation(booleanValue(GridRestClusterStateRequest.ARG_FORCE, params, false));
+
+                restReq = restReq0;
+
+                break;
+            }
+
+            case CLUSTER_STATE:
+            case CLUSTER_SET_STATE: {
+                GridRestClusterStateRequest restReq0 = new GridRestClusterStateRequest();
+
+                if (cmd == CLUSTER_STATE)
+                    restReq0.reqCurrentMode();
+                else {
+                    ClusterState newState = enumValue("state", params, ClusterState.class);
+
+                    restReq0.state(newState);
+
+                    restReq0.forceDeactivation(booleanValue(GridRestClusterStateRequest.ARG_FORCE, params, false));
+                }
+
+                restReq = restReq0;
+
+                break;
+            }
+
+            case CLUSTER_NAME: {
+                restReq = new GridRestClusterNameRequest();
+
+                break;
+            }
+
+            case BASELINE_CURRENT_STATE:
+            case BASELINE_SET:
+            case BASELINE_ADD:
+            case BASELINE_REMOVE: {
+                GridRestBaselineRequest restReq0 = new GridRestBaselineRequest();
+
+                restReq0.topologyVersion(longValue("topVer", params, null));
+                restReq0.consistentIds(values(null, "consistentId", params));
 
                 restReq = restReq0;
 
@@ -852,6 +968,11 @@ public class GridJettyRestHandler extends AbstractHandler {
 
         restReq.command(cmd);
 
+        Object certs = req.getAttribute("javax.servlet.request.X509Certificate");
+
+        if (certs instanceof X509Certificate[])
+            restReq.certificates((X509Certificate[])certs);
+
         // TODO: In IGNITE 3.0 we should check credentials only for AUTHENTICATE command.
         if (!credentials(params, IGNITE_LOGIN, IGNITE_PASSWORD, restReq))
             credentials(params, USER_PARAM, PWD_PARAM, restReq);
@@ -895,14 +1016,14 @@ public class GridJettyRestHandler extends AbstractHandler {
     }
 
     /**
-     *
      * @param params Parameters.
      * @param userParam Parameter name to take user name.
      * @param pwdParam Parameter name to take password.
      * @param restReq Request to add credentials if any.
      * @return {@code true} If params contains credentials.
      */
-    private boolean credentials(Map<String, Object> params, String userParam, String pwdParam, GridRestRequest restReq) {
+    private boolean credentials(Map<String, Object> params, String userParam, String pwdParam,
+        GridRestRequest restReq) {
         boolean hasCreds = params.containsKey(userParam) || params.containsKey(pwdParam);
 
         if (hasCreds) {
@@ -923,7 +1044,8 @@ public class GridJettyRestHandler extends AbstractHandler {
      * @param params Parameters map.
      * @return Values.
      */
-    protected List<Object> values(String type, String keyPrefix, Map<String, Object> params) throws IgniteCheckedException {
+    protected List<Object> values(String type, String keyPrefix,
+        Map<String, Object> params) throws IgniteCheckedException {
         assert keyPrefix != null;
 
         List<Object> vals = new LinkedList<>();
@@ -956,7 +1078,6 @@ public class GridJettyRestHandler extends AbstractHandler {
      * @param req Request.
      * @return Map of parsed parameters.
      */
-    @SuppressWarnings({"unchecked"})
     private Map<String, Object> parameters(ServletRequest req) {
         Map<String, String[]> params = req.getParameterMap();
 

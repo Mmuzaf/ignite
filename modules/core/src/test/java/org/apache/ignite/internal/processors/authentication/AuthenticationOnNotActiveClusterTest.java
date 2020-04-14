@@ -21,18 +21,14 @@ import org.apache.ignite.configuration.DataRegionConfiguration;
 import org.apache.ignite.configuration.DataStorageConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.util.typedef.internal.U;
-import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.TcpDiscoveryIpFinder;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
+import org.apache.ignite.testframework.GridTestUtils;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
+import org.junit.Test;
 
 /**
  * Test for {@link IgniteAuthenticationProcessor}.
  */
 public class AuthenticationOnNotActiveClusterTest extends GridCommonAbstractTest {
-    /** */
-    private static final TcpDiscoveryIpFinder IP_FINDER = new TcpDiscoveryVmIpFinder(true);
-
     /** Nodes count. */
     protected static final int NODES_COUNT = 4;
 
@@ -43,22 +39,28 @@ public class AuthenticationOnNotActiveClusterTest extends GridCommonAbstractTest
     @Override protected IgniteConfiguration getConfiguration(String igniteInstanceName) throws Exception {
         IgniteConfiguration cfg = super.getConfiguration(igniteInstanceName);
 
-        if (getTestIgniteInstanceIndex(igniteInstanceName) == CLI_NODE)
-            cfg.setClientMode(true);
-
-        TcpDiscoverySpi spi = new TcpDiscoverySpi();
-
-        spi.setIpFinder(IP_FINDER);
-
-        cfg.setDiscoverySpi(spi);
-
         cfg.setAuthenticationEnabled(true);
 
         cfg.setDataStorageConfiguration(new DataStorageConfiguration()
             .setDefaultDataRegionConfiguration(new DataRegionConfiguration()
+                .setMaxSize(200L * 1024 * 1024)
                 .setPersistenceEnabled(true)));
 
         return cfg;
+    }
+
+    /** {@inheritDoc} */
+    @Override protected void beforeTestsStarted() throws Exception {
+        super.beforeTestsStarted();
+
+        GridTestUtils.setFieldValue(User.class, "bCryptGensaltLog2Rounds", 4);
+    }
+
+    /** {@inheritDoc} */
+    @Override protected void afterTestsStopped() throws Exception {
+        super.afterTestsStopped();
+
+        GridTestUtils.setFieldValue(User.class, "bCryptGensaltLog2Rounds", 10);
     }
 
     /** {@inheritDoc} */
@@ -78,8 +80,10 @@ public class AuthenticationOnNotActiveClusterTest extends GridCommonAbstractTest
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testDefaultUser() throws Exception {
-        startGrids(NODES_COUNT);
+        startGrids(NODES_COUNT - 1);
+        startClientGrid(CLI_NODE);
 
         for (int i = 0; i < NODES_COUNT; ++i) {
             AuthorizationContext actx = grid(i).context().authentication().authenticate("ignite", "ignite");
@@ -92,8 +96,11 @@ public class AuthenticationOnNotActiveClusterTest extends GridCommonAbstractTest
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testNotDefaultUser() throws Exception {
-        startGrids(NODES_COUNT + 1);
+        startGrids(NODES_COUNT - 1);
+        startClientGrid(CLI_NODE);
+        startGrid(NODES_COUNT);
 
         grid(0).cluster().active(true);
 
@@ -108,7 +115,8 @@ public class AuthenticationOnNotActiveClusterTest extends GridCommonAbstractTest
 
         U.sleep(500);
 
-        startGrids(NODES_COUNT);
+        startGrids(NODES_COUNT - 1);
+        startClientGrid(CLI_NODE);
 
         for (int i = 0; i < NODES_COUNT; ++i) {
             for (int usrCnt = 0; usrCnt < 10; ++usrCnt) {

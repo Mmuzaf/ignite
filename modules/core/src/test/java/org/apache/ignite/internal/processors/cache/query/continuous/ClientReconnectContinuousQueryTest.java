@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import javax.cache.event.CacheEntryListenerException;
 import javax.cache.event.CacheEntryUpdatedListener;
 import org.apache.ignite.IgniteCache;
+import org.apache.ignite.cache.CacheAtomicityMode;
 import org.apache.ignite.cache.query.ContinuousQuery;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
@@ -37,6 +38,7 @@ import org.apache.ignite.lang.IgnitePredicate;
 import org.apache.ignite.spi.communication.tcp.TcpCommunicationSpi;
 import org.apache.ignite.testframework.GridTestUtils;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
+import org.junit.Test;
 
 /**
  *
@@ -72,10 +74,14 @@ public class ClientReconnectContinuousQueryTest extends GridCommonAbstractTest {
         commSpi.setSlowClientQueueLimit(50);
         commSpi.setIdleConnectionTimeout(300_000);
 
-        if (getTestIgniteInstanceName(CLIENT_IDX).equals(gridName))
-            cfg.setClientMode(true);
-        else {
+        if (!getTestIgniteInstanceName(CLIENT_IDX).equals(gridName)) {
             CacheConfiguration ccfg = defaultCacheConfiguration();
+
+            ccfg.setAtomicityMode(atomicityMode());
+
+            // TODO IGNITE-9530 Remove this clause.
+            if (atomicityMode() == CacheAtomicityMode.TRANSACTIONAL_SNAPSHOT)
+                ccfg.setNearConfiguration(null);
 
             cfg.setCacheConfiguration(ccfg);
         }
@@ -84,15 +90,23 @@ public class ClientReconnectContinuousQueryTest extends GridCommonAbstractTest {
     }
 
     /**
+     * @return Transaction snapshot.
+     */
+    protected CacheAtomicityMode atomicityMode() {
+        return CacheAtomicityMode.TRANSACTIONAL;
+    }
+
+    /**
      * Test client reconnect to alive grid.
      *
      * @throws Exception If failed.
      */
+    @Test
     public void testClientReconnect() throws Exception {
         try {
-            startGrids(2);
+            startGrid(0);
 
-            final IgniteEx client = grid(CLIENT_IDX);
+            final IgniteEx client = startClientGrid(CLIENT_IDX);
 
             client.events().localListen(new DisconnectListener(), EventType.EVT_CLIENT_NODE_DISCONNECTED);
 

@@ -32,6 +32,7 @@ import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.plugin.extensions.communication.Message;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
+import org.junit.Test;
 
 /**
  * Tests case when connection is closed only for one side, when other is not notified.
@@ -47,11 +48,8 @@ public class TcpCommunicationSpiHalfOpenedConnectionTest extends GridCommonAbstr
     @Override protected IgniteConfiguration getConfiguration(String igniteInstanceName) throws Exception {
         IgniteConfiguration cfg = super.getConfiguration(igniteInstanceName);
 
-        if (igniteInstanceName.contains("client")) {
-            cfg.setClientMode(true);
-
+        if (igniteInstanceName.contains("client"))
             clientSpi = (TcpCommunicationSpi)cfg.getCommunicationSpi();
-        }
 
         ((TcpCommunicationSpi)cfg.getCommunicationSpi()).setUsePairedConnections(pairedConnections);
 
@@ -66,6 +64,7 @@ public class TcpCommunicationSpiHalfOpenedConnectionTest extends GridCommonAbstr
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testReconnect() throws Exception {
         pairedConnections = false;
 
@@ -75,6 +74,7 @@ public class TcpCommunicationSpiHalfOpenedConnectionTest extends GridCommonAbstr
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testReconnectPaired() throws Exception {
         pairedConnections = true;
 
@@ -86,7 +86,7 @@ public class TcpCommunicationSpiHalfOpenedConnectionTest extends GridCommonAbstr
      */
     private void checkReconnect() throws Exception {
         Ignite srv = startGrid("server");
-        Ignite client = startGrid("client");
+        Ignite client = startClientGrid("client");
 
         UUID nodeId = srv.cluster().localNode().id();
 

@@ -28,6 +28,7 @@ namespace Apache.Ignite.Core.Tests.Services
     using Apache.Ignite.Core.Binary;
     using Apache.Ignite.Core.Cluster;
     using Apache.Ignite.Core.Common;
+    using Apache.Ignite.Core.Impl;
     using Apache.Ignite.Core.Resource;
     using Apache.Ignite.Core.Services;
     using NUnit.Framework;
@@ -272,12 +273,12 @@ namespace Apache.Ignite.Core.Tests.Services
             var ex = Assert.Throws<IgniteException>(()=> Services.GetServiceProxy<ITestIgniteService>(SvcName));
             Assert.AreEqual("Failed to find deployed service: " + SvcName, ex.Message);
 
-            // Deploy to grid2 & grid3
+            // Deploy to grid1 & grid2
             var svc = binarizable
                 ? new TestIgniteServiceBinarizable {TestProperty = 17}
                 : new TestIgniteServiceSerializable {TestProperty = 17};
 
-            Grid1.GetCluster().ForNodeIds(Grid2.GetCluster().GetLocalNode().Id, Grid1.GetCluster().GetLocalNode().Id)
+            Grid3.GetCluster().ForNodeIds(Grid2.GetCluster().GetLocalNode().Id, Grid1.GetCluster().GetLocalNode().Id)
                 .GetServices().DeployNodeSingleton(SvcName, svc);
 
             // Make sure there is no local instance on grid3
@@ -291,7 +292,8 @@ namespace Apache.Ignite.Core.Tests.Services
             Assert.AreEqual(prx.ToString(), svc.ToString());
             Assert.AreEqual(17, prx.TestProperty);
             Assert.IsTrue(prx.Initialized);
-            Assert.IsTrue(prx.Executed);
+            // ReSharper disable once AccessToModifiedClosure
+            Assert.IsTrue(TestUtils.WaitForCondition(() => prx.Executed, 5000));
             Assert.IsFalse(prx.Cancelled);
             Assert.AreEqual(SvcName, prx.LastCallContextName);
 
@@ -325,18 +327,18 @@ namespace Apache.Ignite.Core.Tests.Services
         {
             // Deploy to remotes.
             var svc = new TestIgniteServiceSerializable { TestProperty = 37 };
-            Grid1.GetCluster().ForRemotes().GetServices().DeployNodeSingleton(SvcName, svc);
+            Grid3.GetCluster().ForRemotes().GetServices().DeployNodeSingleton(SvcName, svc);
 
             // Make sure there is no local instance on grid3
             Assert.IsNull(Grid3.GetServices().GetService<ITestIgniteService>(SvcName));
 
             // Get proxy.
-            dynamic prx = Grid3.GetServices().GetDynamicServiceProxy(SvcName, false);
+            dynamic prx = Grid3.GetServices().GetDynamicServiceProxy(SvcName, true);
 
             // Property getter.
             Assert.AreEqual(37, prx.TestProperty);
             Assert.IsTrue(prx.Initialized);
-            Assert.IsTrue(prx.Executed);
+            Assert.IsTrue(TestUtils.WaitForCondition(() => prx.Executed, 5000));
             Assert.IsFalse(prx.Cancelled);
             Assert.AreEqual(SvcName, prx.LastCallContextName);
 
@@ -577,8 +579,10 @@ namespace Apache.Ignite.Core.Tests.Services
             Assert.IsNotNull(firstFailedSvc);
             Assert.IsNotNull(secondFailedSvc);
 
-            Assert.AreEqual(firstFailedIdx, firstFailedSvc.TestProperty);
-            Assert.AreEqual(secondFailedIdx, secondFailedSvc.TestProperty);
+            int[] properties = { firstFailedSvc.TestProperty, secondFailedSvc.TestProperty };
+
+            Assert.IsTrue(properties.Contains(firstFailedIdx));
+            Assert.IsTrue(properties.Contains(secondFailedIdx));
 
             for (var i = 0; i < num; i++)
             {
@@ -866,6 +870,20 @@ namespace Apache.Ignite.Core.Tests.Services
                 binSvc.testBinaryObject(
                     Grid1.GetBinary().ToBinary<IBinaryObject>(new PlatformComputeBinarizable {Field = 6}))
                     .GetField<int>("Field"));
+            
+            DateTime dt = new DateTime(1992, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc);
+
+            Assert.AreEqual(dt, svc.test(dt));
+            Assert.AreEqual(dt, svc.testNullTimestamp(dt));
+            Assert.IsNull(svc.testNullTimestamp(null));
+            Assert.AreEqual(dt, svc.testArray(new DateTime?[] {dt})[0]);
+
+            Guid guid = Guid.NewGuid();
+
+            Assert.AreEqual(guid, svc.test(guid));
+            Assert.AreEqual(guid, svc.testNullUUID(guid));
+            Assert.IsNull(svc.testNullUUID(null));
+            Assert.AreEqual(guid, svc.testArray(new Guid?[] {guid})[0]);
 
             Services.Cancel(javaSvcName);
         }
@@ -936,6 +954,20 @@ namespace Apache.Ignite.Core.Tests.Services
                 binSvc.testBinaryObject(
                     Grid1.GetBinary().ToBinary<IBinaryObject>(new PlatformComputeBinarizable { Field = 6 }))
                     .GetField<int>("Field"));
+
+            DateTime dt = new DateTime(1992, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc);
+
+            Assert.AreEqual(dt, svc.test(dt));
+            Assert.AreEqual(dt, svc.testNullTimestamp(dt));
+            Assert.IsNull(svc.testNullTimestamp(null));
+            Assert.AreEqual(dt, svc.testArray(new DateTime?[] { dt })[0]);
+
+            Guid guid = Guid.NewGuid();
+
+            Assert.AreEqual(guid, svc.test(guid));
+            Assert.AreEqual(guid, svc.testNullUUID(guid));
+            Assert.IsNull(svc.testNullUUID(null));
+            Assert.AreEqual(guid, svc.testArray(new Guid?[] { guid })[0]);
         }
 
         /// <summary>
@@ -957,7 +989,7 @@ namespace Apache.Ignite.Core.Tests.Services
         {
             foreach (var grid in Grids)
             {
-                Assert.AreEqual(CompactFooter, ((Impl.Ignite) grid).Marshaller.CompactFooter);
+                Assert.AreEqual(CompactFooter, ((Ignite) grid).Marshaller.CompactFooter);
                 Assert.AreEqual(CompactFooter, grid.GetConfiguration().BinaryConfiguration.CompactFooter);
             }
         }
@@ -1017,7 +1049,7 @@ namespace Apache.Ignite.Core.Tests.Services
         /// </summary>
         private IgniteConfiguration GetConfiguration(string springConfigUrl)
         {
-#if !NETCOREAPP2_0
+#if !NETCOREAPP2_0 && !NETCOREAPP2_1 && !NETCOREAPP3_0
             if (!CompactFooter)
             {
                 springConfigUrl = Compute.ComputeApiTestFullFooter.ReplaceFooterSetting(springConfigUrl);
@@ -1135,6 +1167,7 @@ namespace Apache.Ignite.Core.Tests.Services
         {
             /** */
             [InstanceResource]
+            // ReSharper disable once UnassignedField.Local
             private IIgnite _grid;
 
             /** <inheritdoc /> */
@@ -1369,6 +1402,12 @@ namespace Apache.Ignite.Core.Tests.Services
             bool test(bool x);
 
             /** */
+            DateTime test(DateTime x);
+
+            /** */
+            Guid test(Guid x);
+
+            /** */
             byte? testWrapper(byte? x);
 
             /** */
@@ -1420,12 +1459,25 @@ namespace Apache.Ignite.Core.Tests.Services
             bool[] testArray(bool[] x);
 
             /** */
+            DateTime?[] testArray(DateTime?[] x);
+
+            /** */
+            Guid?[] testArray(Guid?[] x);
+
+            /** */
             int test(int x, string y);
+
             /** */
             int test(string x, int y);
 
             /** */
             int? testNull(int? x);
+
+            /** */
+            DateTime? testNullTimestamp(DateTime? x);
+
+            /** */
+            Guid? testNullUUID(Guid? x);
 
             /** */
             int testParams(params object[] args);

@@ -88,7 +88,7 @@ public class ViewCacheClosure implements IgniteCallable<List<CacheInfo>> {
                 Collection<CacheGroupContext> contexts = k.context().cache().cacheGroups();
 
                 for (CacheGroupContext context : contexts) {
-                    if (!compiled.matcher(context.cacheOrGroupName()).find())
+                    if (!context.userCache() || !compiled.matcher(context.cacheOrGroupName()).find())
                         continue;
 
                     CacheInfo ci = new CacheInfo();
@@ -99,6 +99,7 @@ public class ViewCacheClosure implements IgniteCallable<List<CacheInfo>> {
                     ci.setBackupsCnt(context.config().getBackups());
                     ci.setAffinityClsName(context.config().getAffinity().getClass().getSimpleName());
                     ci.setMode(context.config().getCacheMode());
+                    ci.setAtomicityMode(context.config().getAtomicityMode());
                     ci.setMapped(mapped(context.caches().iterator().next().name()));
 
                     cacheInfo.add(ci);
@@ -110,10 +111,9 @@ public class ViewCacheClosure implements IgniteCallable<List<CacheInfo>> {
                 Map<String, DynamicCacheDescriptor> descMap = k.context().cache().cacheDescriptors();
 
                 for (Map.Entry<String, DynamicCacheDescriptor> entry : descMap.entrySet()) {
-
                     DynamicCacheDescriptor desc = entry.getValue();
 
-                    if (!compiled.matcher(desc.cacheName()).find())
+                    if (!desc.cacheType().userCache() || !compiled.matcher(desc.cacheName()).find())
                         continue;
 
                     CacheInfo ci = new CacheInfo();
@@ -126,6 +126,7 @@ public class ViewCacheClosure implements IgniteCallable<List<CacheInfo>> {
                     ci.setBackupsCnt(desc.cacheConfiguration().getBackups());
                     ci.setAffinityClsName(desc.cacheConfiguration().getAffinity().getClass().getSimpleName());
                     ci.setMode(desc.cacheConfiguration().getCacheMode());
+                    ci.setAtomicityMode(desc.cacheConfiguration().getAtomicityMode());
                     ci.setMapped(mapped(desc.cacheName()));
 
                     cacheInfo.add(ci);

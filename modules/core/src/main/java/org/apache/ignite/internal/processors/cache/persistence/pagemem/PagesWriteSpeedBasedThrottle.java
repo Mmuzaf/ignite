@@ -22,13 +22,17 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.internal.processors.cache.persistence.CheckpointLockStateChecker;
-import org.apache.ignite.internal.processors.cache.persistence.CheckpointWriteProgressSupplier;
+import org.apache.ignite.internal.processors.cache.persistence.checkpoint.CheckpointProgress;
 import org.apache.ignite.internal.util.GridConcurrentHashSet;
+import org.apache.ignite.internal.util.typedef.internal.U;
+import org.apache.ignite.lang.IgniteOutClosure;
 
 /**
  * Throttles threads that generate dirty pages during ongoing checkpoint.
  * Designed to avoid zero dropdowns that can happen if checkpoint buffer is overflowed.
- * Uses average checkpoint write speed and moment speed of marking pages as dirty.
+ * Uses average checkpoint write speed and moment speed of marking pages as dirty.<br>
+ *
+ * See also: <a href="https://github.com/apache/ignite/tree/master/modules/core/src/main/java/org/apache/ignite/internal/processors/cache/persistence/pagemem#speed-based-throttling">Speed-based throttling description</a>.
  */
 public class PagesWriteSpeedBasedThrottle implements PagesWriteThrottlePolicy {
     /** Maximum dirty pages in region. */
@@ -38,7 +42,7 @@ public class PagesWriteSpeedBasedThrottle implements PagesWriteThrottlePolicy {
     private final PageMemoryImpl pageMemory;
 
     /** Database manager. */
-    private final CheckpointWriteProgressSupplier cpProgress;
+    private final IgniteOutClosure<CheckpointProgress> cpProgress;
 
     /** Starting throttle time. Limits write speed to 1000 MB/s. */
     private static final long STARTING_THROTTLE_NANOS = 4000;
@@ -113,10 +117,12 @@ public class PagesWriteSpeedBasedThrottle implements PagesWriteThrottlePolicy {
      * @param stateChecker Checkpoint lock state provider.
      * @param log Logger.
      */
-    public PagesWriteSpeedBasedThrottle(PageMemoryImpl pageMemory,
-        CheckpointWriteProgressSupplier cpProgress,
-        CheckpointLockStateChecker stateChecker,
-        IgniteLogger log) {
+    public PagesWriteSpeedBasedThrottle(
+            PageMemoryImpl pageMemory,
+            IgniteOutClosure<CheckpointProgress> cpProgress,
+            CheckpointLockStateChecker stateChecker,
+            IgniteLogger log
+    ) {
         this.pageMemory = pageMemory;
         this.cpProgress = cpProgress;
         totalPages = pageMemory.totalPages();
@@ -128,7 +134,9 @@ public class PagesWriteSpeedBasedThrottle implements PagesWriteThrottlePolicy {
     @Override public void onMarkDirty(boolean isPageInCheckpoint) {
         assert cpLockStateChecker.checkpointLockIsHeldByThread();
 
-        AtomicInteger writtenPagesCntr = cpProgress.writtenPagesCounter();
+        CheckpointProgress progress = cpProgress.apply();
+
+        AtomicInteger writtenPagesCntr = progress == null ? null : cpProgress.apply().writtenPagesCounter();
 
         if (writtenPagesCntr == null) {
             speedForMarkAll = 0;
@@ -220,6 +228,8 @@ public class PagesWriteSpeedBasedThrottle implements PagesWriteThrottlePolicy {
             doPark(throttleParkTimeNs);
         }
 
+        pageMemory.metrics().addThrottlingTime(U.nanosToMillis(System.nanoTime() - curNanoTime));
+
         speedMarkAndAvgParkTime.addMeasurementForAverageCalculation(throttleParkTimeNs);
     }
 
@@ -229,6 +239,11 @@ public class PagesWriteSpeedBasedThrottle implements PagesWriteThrottlePolicy {
      * @param throttleParkTimeNs the maximum number of nanoseconds to wait
      */
     protected void doPark(long throttleParkTimeNs) {
+        if (throttleParkTimeNs > LOGGING_THRESHOLD) {
+            U.warn(log, "Parking thread=" + Thread.currentThread().getName()
+                + " for timeout(ms)=" + (throttleParkTimeNs / 1_000_000));
+        }
+
         LockSupport.parkNanos(throttleParkTimeNs);
     }
 
@@ -236,7 +251,7 @@ public class PagesWriteSpeedBasedThrottle implements PagesWriteThrottlePolicy {
      * @return number of written pages.
      */
     private int cpWrittenPages() {
-        AtomicInteger writtenPagesCntr = cpProgress.writtenPagesCounter();
+        AtomicInteger writtenPagesCntr = cpProgress.apply().writtenPagesCounter();
 
         return writtenPagesCntr == null ? 0 : writtenPagesCntr.get();
     }
@@ -245,14 +260,14 @@ public class PagesWriteSpeedBasedThrottle implements PagesWriteThrottlePolicy {
      * @return Number of pages in current checkpoint.
      */
     private int cpTotalPages() {
-        return cpProgress.currentCheckpointPagesCount();
+        return cpProgress.apply().currentCheckpointPagesCount();
     }
 
     /**
      * @return  Counter for fsynced checkpoint pages.
      */
     private int cpSyncedPages() {
-        AtomicInteger syncedPagesCntr = cpProgress.syncedPagesCounter();
+        AtomicInteger syncedPagesCntr = cpProgress.apply().syncedPagesCounter();
 
         return syncedPagesCntr == null ? 0 : syncedPagesCntr.get();
     }
@@ -261,7 +276,7 @@ public class PagesWriteSpeedBasedThrottle implements PagesWriteThrottlePolicy {
      * @return number of evicted pages.
      */
     private int cpEvictedPages() {
-        AtomicInteger evictedPagesCntr = cpProgress.evictedPagesCntr();
+        AtomicInteger evictedPagesCntr = cpProgress.apply().evictedPagesCounter();
 
         return evictedPagesCntr == null ? 0 : evictedPagesCntr.get();
     }

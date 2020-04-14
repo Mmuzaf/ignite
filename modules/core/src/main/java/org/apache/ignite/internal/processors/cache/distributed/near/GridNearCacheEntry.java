@@ -46,7 +46,7 @@ import static org.apache.ignite.events.EventType.EVT_CACHE_OBJECT_READ;
 /**
  * Near cache entry.
  */
-@SuppressWarnings({"NonPrivateFieldAccessedInSynchronizedContext", "TooBroadScope"})
+@SuppressWarnings({"TooBroadScope"})
 public class GridNearCacheEntry extends GridDistributedCacheEntry {
     /** */
     private static final int NEAR_SIZE_OVERHEAD = 36 + 16;
@@ -55,7 +55,6 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
     private volatile AffinityTopologyVersion topVer = AffinityTopologyVersion.NONE;
 
     /** DHT version which caused the last update. */
-    @SuppressWarnings("FieldAccessedSynchronizedAndUnsynchronized")
     private GridCacheVersion dhtVer;
 
     /** Partition. */
@@ -111,6 +110,7 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
                 return false;
             }
 
+            // As a result of topology change, this node is now a backup for the key - no more need for a Near entry.
             if (cctx.affinity().backupByPartition(cctx.localNode(), part, topVer)) {
                 this.topVer = AffinityTopologyVersion.NONE;
 
@@ -380,7 +380,6 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
      * @throws IgniteCheckedException In case of error.
      * @throws GridCacheEntryRemovedException If entry was removed.
      */
-    @SuppressWarnings({"RedundantTypeArguments"})
     public boolean loadedValue(@Nullable IgniteInternalTx tx,
         UUID primaryNodeId,
         CacheObject val,
@@ -414,6 +413,9 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
                 primaryNode(primaryNodeId, topVer);
 
                 update(val, expireTime, ttl, ver, true);
+
+                // Special case for platform cache: start tracking near entry.
+                updatePlatformCache(val, topVer);
 
                 if (cctx.deferredDelete() && !isInternal()) {
                     boolean deleted = val == null;
@@ -458,7 +460,7 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
     }
 
     /** {@inheritDoc} */
-    @Override protected boolean storeValue(CacheObject val, long expireTime, GridCacheVersion ver, CacheDataRow oldRow) {
+    @Override protected boolean storeValue(CacheObject val, long expireTime, GridCacheVersion ver) {
         return false;
         // No-op: queries are disabled for near cache.
     }
@@ -555,7 +557,7 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
                 mvccExtras(mvcc);
             }
 
-            GridCacheMvccCandidate c = mvcc.localCandidate(locId, threadId);
+            GridCacheMvccCandidate c = mvcc.localCandidateByThreadOrVer(locId, threadId, ver);
 
             if (c != null)
                 return reenter ? c.reenter() : null;
@@ -752,6 +754,12 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
         assert lockedByCurrentThread();
 
         return evictReservations > 0;
+    }
+
+    /** {@inheritDoc} */
+    @Override public void onMarkedObsolete() {
+        // GridCacheMapEntry.onMarkedObsolete is called immediately after performing operation for any non-primary key.
+        updatePlatformCache(null, null);
     }
 
     /**

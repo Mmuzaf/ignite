@@ -18,11 +18,12 @@
 package org.apache.ignite.jdbc.thin;
 
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
-import java.util.Map;
 import org.apache.ignite.internal.util.typedef.F;
-import org.apache.ignite.internal.util.typedef.internal.U;
+import org.junit.Test;
 
 /**
  * Test that replicated-only query is executed locally.
@@ -32,9 +33,7 @@ public class JdbcThinLocalQueriesSelfTest extends JdbcThinAbstractSelfTest {
     @Override protected void beforeTest() throws Exception {
         super.beforeTest();
 
-        startGrid(0);
-
-        startGrid(1);
+        startGrids(2);
     }
 
     /** {@inheritDoc} */
@@ -47,6 +46,7 @@ public class JdbcThinLocalQueriesSelfTest extends JdbcThinAbstractSelfTest {
     /**
      *
      */
+    @Test
     public void testLocalThinJdbcQuery() throws SQLException {
         try (Connection c = connect(grid(0), "replicatedOnly=true")) {
             execute(c, "CREATE TABLE Company(id int primary key, name varchar) WITH " +
@@ -63,11 +63,45 @@ public class JdbcThinLocalQueriesSelfTest extends JdbcThinAbstractSelfTest {
                 "p.companyid = c.id");
 
             assertEqualsCollections(F.asList(2, "John", "Apple"), res.get(0));
+        }
+    }
 
-            Map twoStepCache = U.field(grid(0).context().query().getIndexing(), "twoStepCache");
+    /**
+     * Test lazy query on replicated cache to check table unlock logic.
+     */
+    @Test
+    public void testLazyMode() throws Exception {
+        final int ROWS = 10;
 
-            // No two step queries cached => local select.
-            assertEquals(0, twoStepCache.size());
+        try (Connection c = connect(grid(0), "lazy=true&replicatedOnly=true")) {
+            try (Statement stmt = c.createStatement()) {
+                stmt.executeUpdate("CREATE TABLE TEST (ID LONG PRIMARY KEY, VAL VARCHAR) " +
+                    "WITH \"TEMPLATE=REPLICATED\"");
+
+                for (int i = 0; i < ROWS; ++i)
+                    stmt.executeUpdate("INSERT INTO TEST (ID, VAL) VALUES (" + i + ", 'val_" + i + "')");
+
+                try (ResultSet rs = stmt.executeQuery("SELECT * FROM TEST")) {
+                    int cnt = 0;
+
+                    while (rs.next())
+                        cnt++;
+
+                    assertEquals(ROWS, cnt);
+                }
+
+                // Test paged fetch. Different client threads may be used.
+                stmt.setFetchSize(1);
+
+                try(ResultSet rs = stmt.executeQuery("SELECT * FROM TEST")) {
+                    int cnt = 0;
+
+                    while (rs.next())
+                        cnt++;
+
+                    assertEquals(ROWS, cnt);
+                }
+            }
         }
     }
 }

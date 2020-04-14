@@ -36,10 +36,8 @@ import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.lang.IgniteClosure;
 import org.apache.ignite.lang.IgniteOutClosure;
 import org.apache.ignite.resources.LoggerResource;
-import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.TcpDiscoveryIpFinder;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
+import org.junit.Test;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.ignite.cache.CacheAtomicityMode.ATOMIC;
@@ -49,17 +47,9 @@ import static org.apache.ignite.cache.CacheWriteSynchronizationMode.FULL_SYNC;
 /**
  */
 public class CacheContinuousWithTransformerFailoverTest extends GridCommonAbstractTest {
-    /** */
-    private static TcpDiscoveryIpFinder ipFinder = new TcpDiscoveryVmIpFinder(true);
-
-    /** */
-    private boolean client;
-
     /** {@inheritDoc} */
     @Override protected IgniteConfiguration getConfiguration(String igniteInstanceName) throws Exception {
         IgniteConfiguration cfg = super.getConfiguration(igniteInstanceName);
-
-        ((TcpDiscoverySpi)cfg.getDiscoverySpi()).setIpFinder(ipFinder);
 
         CacheConfiguration ccfg = new CacheConfiguration(DEFAULT_CACHE_NAME);
 
@@ -68,7 +58,6 @@ public class CacheContinuousWithTransformerFailoverTest extends GridCommonAbstra
         ccfg.setWriteSynchronizationMode(FULL_SYNC);
 
         cfg.setCacheConfiguration(ccfg);
-        cfg.setClientMode(client);
 
         return cfg;
     }
@@ -83,16 +72,13 @@ public class CacheContinuousWithTransformerFailoverTest extends GridCommonAbstra
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testServerNodeLeft() throws Exception {
         startGrids(3);
 
-        client = true;
-
         final int CLIENT_ID = 3;
 
-        Ignite clnNode = startGrid(CLIENT_ID);
-
-        client = false;
+        Ignite clnNode = startClientGrid(CLIENT_ID);
 
         IgniteOutClosure<IgniteCache<Integer, Integer>> cache =
             new IgniteOutClosure<IgniteCache<Integer, Integer>>() {
@@ -150,6 +136,7 @@ public class CacheContinuousWithTransformerFailoverTest extends GridCommonAbstra
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testTransformerException() throws Exception {
         try {
             startGrids(1);
@@ -204,6 +191,7 @@ public class CacheContinuousWithTransformerFailoverTest extends GridCommonAbstra
      *
      * @throws Exception If failed.
      */
+    @Test
     public void testCrossCallback() throws Exception {
         startGrids(2);
         try {

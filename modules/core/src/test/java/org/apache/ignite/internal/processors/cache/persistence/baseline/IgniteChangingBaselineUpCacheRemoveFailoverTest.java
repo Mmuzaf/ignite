@@ -70,9 +70,9 @@ public class IgniteChangingBaselineUpCacheRemoveFailoverTest extends GridCacheAb
             new DataStorageConfiguration()
                 .setDefaultDataRegionConfiguration(new DataRegionConfiguration()
                     .setPersistenceEnabled(true)
-                    .setInitialSize(200 * 1024 * 1024)
-                    .setMaxSize(200 * 1024 * 1024)
-                    .setCheckpointPageBufferSize(200 * 1024 * 1024)
+                    .setInitialSize(200L * 1024 * 1024)
+                    .setMaxSize(200L * 1024 * 1024)
+                    .setCheckpointPageBufferSize(200L * 1024 * 1024)
                 )
         );
 
@@ -97,8 +97,6 @@ public class IgniteChangingBaselineUpCacheRemoveFailoverTest extends GridCacheAb
 
     /** {@inheritDoc} */
     @Override protected void afterTestsStopped() throws Exception {
-        stopAllGrids();
-
         cleanPersistenceDir();
     }
 
@@ -122,6 +120,8 @@ public class IgniteChangingBaselineUpCacheRemoveFailoverTest extends GridCacheAb
                 startGrid(GRIDS_COUNT);
 
                 IgniteEx ig0 = grid(0);
+
+                ig0.cluster().baselineAutoAdjustEnabled(false);
 
                 ig0.cluster().setBaselineTopology(baselineNodes(ig0.cluster().forServers().nodes()));
 

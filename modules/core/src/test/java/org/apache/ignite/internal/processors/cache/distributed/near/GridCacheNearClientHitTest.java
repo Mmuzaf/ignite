@@ -24,11 +24,9 @@ import org.apache.ignite.cache.CacheAtomicityMode;
 import org.apache.ignite.cache.CacheMode;
 import org.apache.ignite.cache.eviction.lru.LruEvictionPolicy;
 import org.apache.ignite.configuration.CacheConfiguration;
-import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.configuration.NearCacheConfiguration;
-import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
+import org.junit.Test;
 
 import static org.apache.ignite.cache.CachePeekMode.NEAR;
 
@@ -36,33 +34,8 @@ import static org.apache.ignite.cache.CachePeekMode.NEAR;
  *
  */
 public class GridCacheNearClientHitTest extends GridCommonAbstractTest {
-    /** Ip finder. */
-    private final static TcpDiscoveryVmIpFinder ipFinder = new TcpDiscoveryVmIpFinder(true);
-
     /** */
-    private final static String CACHE_NAME = "test-near-cache";
-
-    /** {@inheritDoc} */
-    @Override protected IgniteConfiguration getConfiguration(final String igniteInstanceName) throws Exception {
-        final IgniteConfiguration cfg = super.getConfiguration(igniteInstanceName);
-
-        ((TcpDiscoverySpi)cfg.getDiscoverySpi()).setIpFinder(ipFinder);
-
-        return cfg;
-    }
-
-    /**
-     * @param igniteInstanceName Node name.
-     * @return Configuration.
-     * @throws Exception If failed.
-     */
-    private IgniteConfiguration getClientConfiguration(final String igniteInstanceName) throws Exception {
-        final IgniteConfiguration cfg = getConfiguration(igniteInstanceName);
-
-        cfg.setClientMode(true);
-
-        return cfg;
-    }
+    private static final String CACHE_NAME = "test-near-cache";
 
     /**
      * @return Cache configuration.
@@ -71,14 +44,11 @@ public class GridCacheNearClientHitTest extends GridCommonAbstractTest {
         CacheConfiguration<Object, Object> cfg = new CacheConfiguration<>();
 
         cfg.setAtomicityMode(CacheAtomicityMode.ATOMIC);
-
         cfg.setCacheMode(CacheMode.PARTITIONED);
-
         cfg.setBackups(1);
-
         cfg.setCopyOnRead(false);
-
         cfg.setName(CACHE_NAME);
+        cfg.setNearConfiguration(new NearCacheConfiguration<>());
 
         return cfg;
     }
@@ -97,11 +67,12 @@ public class GridCacheNearClientHitTest extends GridCommonAbstractTest {
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testLocalPeekAfterPrimaryNodeLeft() throws Exception {
         try {
             Ignite crd = startGrid("coordinator", getConfiguration("coordinator"));
 
-            Ignite client = startGrid("client", getClientConfiguration("client"));
+            Ignite client = startClientGrid("client", getConfiguration("client"));
 
             Ignite srvNode = startGrid("server", getConfiguration("server"));
 

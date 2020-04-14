@@ -18,7 +18,6 @@
 package org.apache.ignite.internal.processors.cache.transactions;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.Callable;
@@ -26,20 +25,18 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerArray;
-import org.apache.ignite.Ignite;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.configuration.TransactionConfiguration;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.IgniteInternalFuture;
 import org.apache.ignite.internal.TestRecordingCommunicationSpi;
-import org.apache.ignite.internal.processors.cache.GridCacheFuture;
-import org.apache.ignite.internal.util.typedef.G;
 import org.apache.ignite.internal.util.typedef.internal.U;
-import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
+import org.apache.ignite.testframework.MvccFeatureChecker;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.apache.ignite.transactions.Transaction;
+import org.junit.Assume;
+import org.junit.Test;
 
 import static java.lang.Thread.yield;
 import static org.apache.ignite.cache.CacheAtomicityMode.TRANSACTIONAL;
@@ -56,9 +53,6 @@ public class TxRollbackOnTopologyChangeTest extends GridCommonAbstractTest {
 
     /** */
     private static final String CACHE_NAME = "test";
-
-    /** IP finder. */
-    private static final TcpDiscoveryVmIpFinder IP_FINDER = new TcpDiscoveryVmIpFinder(true);
 
     /** */
     private static final int SRV_CNT = 6;
@@ -79,11 +73,7 @@ public class TxRollbackOnTopologyChangeTest extends GridCommonAbstractTest {
         cfg.setTransactionConfiguration(new TransactionConfiguration().
             setTxTimeoutOnPartitionMapExchange(ROLLBACK_TIMEOUT));
 
-        ((TcpDiscoverySpi)cfg.getDiscoverySpi()).setIpFinder(IP_FINDER);
-
         cfg.setCommunicationSpi(new TestRecordingCommunicationSpi());
-
-        cfg.setClientMode(getTestIgniteInstanceIndex(igniteInstanceName) >= SRV_CNT);
 
         CacheConfiguration ccfg = new CacheConfiguration(CACHE_NAME);
 
@@ -98,9 +88,13 @@ public class TxRollbackOnTopologyChangeTest extends GridCommonAbstractTest {
 
     /** {@inheritDoc} */
     @Override protected void beforeTest() throws Exception {
+        Assume.assumeFalse("https://issues.apache.org/jira/browse/IGNITE-9322", MvccFeatureChecker.forcedMvcc());
+        //Won't start nodes if the only test mutes.
+
         super.beforeTest();
 
-        startGridsMultiThreaded(TOTAL_CNT);
+        startGridsMultiThreaded(SRV_CNT);
+        startClientGridsMultiThreaded(SRV_CNT, CLNT_CNT);
     }
 
     /** {@inheritDoc} */
@@ -113,6 +107,7 @@ public class TxRollbackOnTopologyChangeTest extends GridCommonAbstractTest {
     /**
      * Tests rollbacks on topology change.
      */
+    @Test
     public void testRollbackOnTopologyChange() throws Exception {
         final AtomicBoolean stop = new AtomicBoolean();
 
@@ -192,7 +187,10 @@ public class TxRollbackOnTopologyChangeTest extends GridCommonAbstractTest {
 
                     doSleep(500 + r.nextInt(1000));
 
-                    startGrid(nodeId);
+                    if (nodeId >= SRV_CNT)
+                        startClientGrid(nodeId);
+                    else
+                        startGrid(nodeId);
 
                     reservedIdx.set(nodeId, 0);
                 }
@@ -208,21 +206,5 @@ public class TxRollbackOnTopologyChangeTest extends GridCommonAbstractTest {
         restartFut.get();
 
         checkFutures();
-    }
-
-    /**
-     * Checks if all tx futures are finished.
-     */
-    private void checkFutures() {
-        for (Ignite ignite : G.allGrids()) {
-            IgniteEx ig = (IgniteEx)ignite;
-
-            final Collection<GridCacheFuture<?>> futs = ig.context().cache().context().mvcc().activeFutures();
-
-            for (GridCacheFuture<?> fut : futs)
-                log.info("Waiting for future: " + fut);
-
-            assertTrue("Expecting no active futures: node=" + ig.localNode().id(), futs.isEmpty());
-        }
     }
 }

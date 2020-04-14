@@ -18,11 +18,16 @@
 namespace Apache.Ignite.Core.Client
 {
     using System;
+    using System.Collections.Generic;
     using System.ComponentModel;
+    using System.Diagnostics.CodeAnalysis;
+    using System.Linq;
     using System.Xml;
     using Apache.Ignite.Core.Binary;
     using Apache.Ignite.Core.Impl.Binary;
+    using Apache.Ignite.Core.Impl.Client;
     using Apache.Ignite.Core.Impl.Common;
+    using Apache.Ignite.Core.Log;
 
     /// <summary>
     /// Ignite thin client configuration.
@@ -58,11 +63,25 @@ namespace Apache.Ignite.Core.Client
         /// </summary>
         public IgniteClientConfiguration()
         {
+#pragma warning disable 618
             Port = DefaultPort;
+#pragma warning restore 618
             SocketSendBufferSize = DefaultSocketBufferSize;
             SocketReceiveBufferSize = DefaultSocketBufferSize;
             TcpNoDelay = DefaultTcpNoDelay;
             SocketTimeout = DefaultSocketTimeout;
+            Logger = new ConsoleLogger();
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="IgniteClientConfiguration" /> class.
+        /// </summary>
+        /// <param name="host">The host to connect to.</param>
+        public IgniteClientConfiguration(string host) : this()
+        {
+            IgniteArgumentCheck.NotNull(host, "host");
+
+            Endpoints = new List<string> {host};
         }
 
         /// <summary>
@@ -76,8 +95,10 @@ namespace Apache.Ignite.Core.Client
                 return;
             }
 
+#pragma warning disable 618
             Host = cfg.Host;
             Port = cfg.Port;
+#pragma warning restore 618
             SocketSendBufferSize = cfg.SocketSendBufferSize;
             SocketReceiveBufferSize = cfg.SocketReceiveBufferSize;
             TcpNoDelay = cfg.TcpNoDelay;
@@ -93,18 +114,47 @@ namespace Apache.Ignite.Core.Client
 
             UserName = cfg.UserName;
             Password = cfg.Password;
+            Endpoints = cfg.Endpoints == null ? null : cfg.Endpoints.ToList();
+            ReconnectDisabled = cfg.ReconnectDisabled;
+            EnablePartitionAwareness = cfg.EnablePartitionAwareness;
+            Logger = cfg.Logger;
+            ProtocolVersion = cfg.ProtocolVersion;
         }
 
         /// <summary>
         /// Gets or sets the host. Should not be null.
         /// </summary>
+        [Obsolete("Use Endpoints instead")]
         public string Host { get; set; }
 
         /// <summary>
         /// Gets or sets the port.
         /// </summary>
         [DefaultValue(DefaultPort)]
+        [Obsolete("Use Endpoints instead")]
         public int Port { get; set; }
+
+        /// <summary>
+        /// Gets or sets endpoints to connect to.
+        /// Examples of supported formats:
+        ///  * 192.168.1.25 (default port is used, see <see cref="DefaultPort"/>).
+        ///  * 192.168.1.25:780 (custom port)
+        ///  * 192.168.1.25:780..787 (custom port range)
+        ///  * my-host.com (default port is used, see <see cref="DefaultPort"/>).
+        ///  * my-host.com:780 (custom port)
+        ///  * my-host.com:780..787 (custom port range)
+        /// <para />
+        /// When multiple endpoints are specified, failover and load-balancing mechanism is enabled:
+        /// * Ignite picks random endpoint and connects to it.
+        /// * On disconnect, next endpoint is picked from the list (.
+        /// </summary>
+        [SuppressMessage("Microsoft.Usage", "CA2227:CollectionPropertiesShouldBeReadOnly")]
+        public ICollection<string> Endpoints { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether automatic reconnect is disabled.
+        /// </summary>
+        public bool ReconnectDisabled { get; set; }
 
         /// <summary>
         /// Gets or sets the size of the socket send buffer. When set to 0, operating system default is used.
@@ -159,9 +209,30 @@ namespace Apache.Ignite.Core.Client
         public string Password { get; set; }
 
         /// <summary>
+        /// Gets or sets a value indicating whether partition awareness should be enabled.
+        /// <para />
+        /// Default is false: only one connection is established at a given moment to a random server node.
+        /// When true: for cache operations, Ignite client attempts to send the request directly to
+        /// the primary node for the given cache key.
+        /// To do so, connection is established to every known server node at all times.
+        /// </summary>
+        public bool EnablePartitionAwareness { get; set; }
+        
+        /// <summary>
+        /// Gets or sets the logger.
+        /// Default is <see cref="ConsoleLogger"/>. Set to <c>null</c> to disable logging.
+        /// </summary>
+        public ILogger Logger { get; set; }
+
+        /// <summary>
         /// Gets or sets custom binary processor. Internal property for tests.
         /// </summary>
         internal IBinaryProcessor BinaryProcessor { get; set; }
+
+        /// <summary>
+        /// Gets or sets protocol version. Internal property for tests.
+        /// </summary>
+        internal ClientProtocolVersion? ProtocolVersion { get; set; }
 
         /// <summary>
         /// Serializes this instance to the specified XML writer.

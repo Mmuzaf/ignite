@@ -24,26 +24,25 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Callable;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.ClientConnectorConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.binary.BinaryMarshaller;
-import org.apache.ignite.internal.jdbc.thin.JdbcThinTcpIo;
-import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.TcpDiscoveryIpFinder;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
+import org.apache.ignite.internal.jdbc.thin.JdbcThinConnection;
+import org.apache.ignite.internal.processors.odbc.ClientListenerProcessor;
+import org.apache.ignite.internal.util.lang.GridAbsPredicate;
+import org.apache.ignite.mxbean.ClientProcessorMXBean;
 import org.apache.ignite.testframework.GridTestUtils;
 import org.jetbrains.annotations.NotNull;
+import org.junit.Test;
 
 /**
  * JDBC driver reconnect test with multiple addresses.
  */
 @SuppressWarnings("ThrowableNotThrown")
 public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSelfTest {
-    /** IP finder. */
-    private static final TcpDiscoveryIpFinder IP_FINDER = new TcpDiscoveryVmIpFinder(true);
-
     /** Nodes count. */
     private static final int NODES_CNT = 3;
 
@@ -73,16 +72,11 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
 
         cfg.setCacheConfiguration(cacheConfiguration(DEFAULT_CACHE_NAME));
 
-        TcpDiscoverySpi disco = new TcpDiscoverySpi();
-
-        disco.setIpFinder(IP_FINDER);
-
-        cfg.setDiscoverySpi(disco);
-
         cfg.setMarshaller(new BinaryMarshaller());
 
         cfg.setClientConnectorConfiguration(
-            new ClientConnectorConfiguration().setPort(jdbcPorts.get(getTestIgniteInstanceIndex(name))));
+            new ClientConnectorConfiguration()
+                .setPort(jdbcPorts.get(getTestIgniteInstanceIndex(name))));
 
         return cfg;
     }
@@ -120,6 +114,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testMultipleAddressesConnect() throws Exception {
         try (Connection conn = DriverManager.getConnection(url())) {
             try (Statement stmt = conn.createStatement()) {
@@ -137,6 +132,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testPortRangeConnect() throws Exception {
         try (Connection conn = DriverManager.getConnection(URL_PORT_RANGE)) {
             try (Statement stmt = conn.createStatement()) {
@@ -154,6 +150,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testMultipleAddressesOneNodeFailoverOnStatementExecute() throws Exception {
         checkReconnectOnStatementExecute(url(), false);
     }
@@ -161,6 +158,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testMultipleAddressesAllNodesFailoverOnStatementExecute() throws Exception {
         checkReconnectOnStatementExecute(url(), true);
     }
@@ -168,6 +166,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testPortRangeAllNodesFailoverOnStatementExecute() throws Exception {
         checkReconnectOnStatementExecute(URL_PORT_RANGE, true);
     }
@@ -175,6 +174,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testMultipleAddressesOneNodeFailoverOnResultSet() throws Exception {
         checkReconnectOnResultSet(url(), false);
     }
@@ -182,6 +182,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testMultipleAddressesAllNodesFailoverOnResultSet() throws Exception {
         checkReconnectOnResultSet(url(), true);
     }
@@ -189,6 +190,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testPortRangeAllNodesFailoverOnResultSet() throws Exception {
         checkReconnectOnResultSet(URL_PORT_RANGE, true);
     }
@@ -196,6 +198,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testMultipleAddressesOneNodeFailoverOnMeta() throws Exception {
         checkReconnectOnMeta(url(), false);
     }
@@ -203,6 +206,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testMultipleAddressesAllNodesFailoverOnMeta() throws Exception {
         checkReconnectOnMeta(url(), true);
     }
@@ -210,6 +214,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testPortRangeAllNodesFailoverOnMeta() throws Exception {
         checkReconnectOnMeta(URL_PORT_RANGE, true);
     }
@@ -217,12 +222,113 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testMultipleAddressesOneNodeFailoverOnStreaming() throws Exception {
         checkReconnectOnStreaming(url(), false);
     }
 
     /**
-     * Check failover on restart cluster ar stop one node.
+     * @throws Exception If failed.
+     */
+    @Test
+    public void testClientConnectionMXBean() throws Exception {
+        Connection conn = DriverManager.getConnection(URL_PORT_RANGE);
+
+        try {
+            final Statement stmt0 = conn.createStatement();
+
+            stmt0.execute("SELECT 1");
+
+            ResultSet rs0 = stmt0.getResultSet();
+
+            ClientProcessorMXBean serverMxBean = null;
+
+            // Find node which client is connected to.
+            for (int i = 0; i < NODES_CNT; i++) {
+                serverMxBean = clientProcessorBean(i);
+
+                if (!serverMxBean.getConnections().isEmpty())
+                    break;
+            }
+
+            assertNotNull("No ClientConnections MXBean found.", serverMxBean);
+
+            serverMxBean.dropAllConnections();
+
+            GridTestUtils.assertThrows(log, new Callable<Object>() {
+                @Override public Object call() throws Exception {
+                    stmt0.execute("SELECT 1");
+
+                    return null;
+                }
+            }, SQLException.class, "Failed to communicate with Ignite cluster");
+
+            assertTrue(rs0.isClosed());
+            assertTrue(stmt0.isClosed());
+
+            assertTrue(getActiveClients().isEmpty());
+
+            final Statement stmt1 = conn.createStatement();
+
+            stmt1.execute("SELECT 1");
+
+            ResultSet rs1 = stmt1.getResultSet();
+
+            // Check active clients.
+            List<String> activeClients = getActiveClients();
+
+            assertEquals(1, activeClients.size());
+
+            assertTrue(rs1.next());
+            assertEquals(1, rs1.getInt(1));
+
+            rs1.close();
+            stmt1.close();
+        }
+        finally {
+            conn.close();
+        }
+
+        boolean allClosed = GridTestUtils.waitForCondition(new GridAbsPredicate() {
+            @Override public boolean apply() {
+                return getActiveClients().isEmpty();
+            }
+        }, 10_000);
+
+        assertTrue(allClosed);
+    }
+
+    /**
+     * Return active client list.
+     *
+     * @return clients.
+     */
+    @NotNull private List<String> getActiveClients() {
+        List<String> activeClients = new ArrayList<>(1);
+
+        for (int i = 0; i < NODES_CNT; i++) {
+            ClientProcessorMXBean mxBean = clientProcessorBean(i);
+
+            assertNotNull(mxBean);
+
+            activeClients.addAll(mxBean.getConnections());
+        }
+        return activeClients;
+    }
+
+    /**
+     * Return ClientProcessorMXBean.
+     *
+     * @return MBean.
+     */
+    private ClientProcessorMXBean clientProcessorBean(int igniteInt) {
+        return getMxBean(getTestIgniteInstanceName(igniteInt), "Clients",
+            ClientListenerProcessor.class, ClientProcessorMXBean.class);
+    }
+
+    /**
+     * Check failover on restart cluster or stop one node.
+     *
      * @param url Connection URL.
      * @param allNodes Restart all nodes flag.
      * @throws Exception If failed.
@@ -231,7 +337,9 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
         try (Connection conn = DriverManager.getConnection(url)) {
             DatabaseMetaData meta = conn.getMetaData();
 
-            ResultSet rs0 = meta.getTables(null, null, null, null);
+            final String[] types = {"TABLES"};
+
+            ResultSet rs0 = meta.getTables(null, null, null, types);
 
             assertFalse(rs0.next());
 
@@ -247,13 +355,14 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
 
             restart(allNodes);
 
-            rs0 = meta.getTables(null, null, null, null);
+            rs0 = meta.getTables(null, null, null, types);
             assertFalse(rs0.next());
         }
     }
 
     /**
      * Check failover on restart cluster ar stop one node.
+     *
      * @param url Connection URL.
      * @param allNodes Restart all nodes flag.
      * @throws Exception If failed.
@@ -298,6 +407,7 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
 
     /**
      * Check failover on restart cluster ar stop one node.
+     *
      * @param url Connection URL.
      * @param allNodes Restart all nodes flag.
      * @throws Exception If failed.
@@ -340,9 +450,9 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
         }
     }
 
-
     /**
      * Check failover on restart cluster ar stop one node.
+     *
      * @param url Connection URL.
      * @param allNodes Restart all nodes flag.
      * @throws Exception If failed.
@@ -406,11 +516,16 @@ public class JdbcThinConnectionMultipleAddressesTest extends JdbcThinAbstractSel
         if (all)
             stopAllGrids();
         else {
-            JdbcThinTcpIo io = GridTestUtils.getFieldValue(conn, "cliIo");
 
-            int idx = GridTestUtils.getFieldValue(io, "srvIdx");
+            if (partitionAwareness) {
+                for (int i = 0; i < NODES_CNT - 1; i++)
+                    stopGrid(i);
+            }
+            else {
+                int idx = ((JdbcThinConnection)conn).serverIndex();
 
-            stopGrid(idx);
+                stopGrid(idx);
+            }
         }
     }
 

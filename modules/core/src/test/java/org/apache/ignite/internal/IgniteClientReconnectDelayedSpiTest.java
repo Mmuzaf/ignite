@@ -30,6 +30,7 @@ import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.lang.IgniteBiPredicate;
 import org.apache.ignite.plugin.extensions.communication.Message;
 import org.apache.ignite.testframework.GridTestUtils;
+import org.junit.Test;
 
 /**
  * Test cases for emulation of delayed messages sending with {@link TestRecordingCommunicationSpi} for blocking and
@@ -59,6 +60,7 @@ public class IgniteClientReconnectDelayedSpiTest extends IgniteClientReconnectAb
      *
      * @throws Exception If failed.
      */
+    @Test
     public void testReconnectCacheDestroyedDelayedAffinityChange() throws Exception {
         Ignite ignite = ignite(1);
 
@@ -72,7 +74,7 @@ public class IgniteClientReconnectDelayedSpiTest extends IgniteClientReconnectAb
             }
         });
 
-        final Ignite client = startGrid(getConfiguration().setClientMode(true));
+        final Ignite client = startClientGrid(getConfiguration());
 
         client.getOrCreateCache(new CacheConfiguration<>(DEFAULT_CACHE_NAME));
 

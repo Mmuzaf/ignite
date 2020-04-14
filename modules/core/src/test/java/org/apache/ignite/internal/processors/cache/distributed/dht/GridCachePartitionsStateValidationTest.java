@@ -43,6 +43,8 @@ import org.apache.ignite.internal.IgniteInternalFuture;
 import org.apache.ignite.internal.managers.communication.GridIoMessage;
 import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.GridDhtPartitionsFullMessage;
 import org.apache.ignite.internal.processors.cache.distributed.dht.preloader.GridDhtPartitionsSingleMessage;
+import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtLocalPartition;
+import org.apache.ignite.internal.processors.cache.distributed.dht.topology.GridDhtPartitionsStateValidator;
 import org.apache.ignite.internal.util.future.GridFutureAdapter;
 import org.apache.ignite.lang.IgniteInClosure;
 import org.apache.ignite.plugin.extensions.communication.Message;
@@ -53,6 +55,7 @@ import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.apache.ignite.transactions.Transaction;
 import org.apache.ignite.transactions.TransactionConcurrency;
 import org.apache.ignite.transactions.TransactionIsolation;
+import org.junit.Test;
 
 /**
  *
@@ -60,9 +63,6 @@ import org.apache.ignite.transactions.TransactionIsolation;
 public class GridCachePartitionsStateValidationTest extends GridCommonAbstractTest {
     /** Cache name. */
     private static final String CACHE_NAME = "cache";
-
-    /** */
-    private boolean clientMode;
 
     /** {@inheritDoc */
     @Override protected IgniteConfiguration getConfiguration(String igniteInstanceName) throws Exception {
@@ -77,9 +77,6 @@ public class GridCachePartitionsStateValidationTest extends GridCommonAbstractTe
 
         cfg.setCommunicationSpi(new SingleMessageInterceptorCommunicationSpi(2));
 
-        if (clientMode)
-            cfg.setClientMode(true);
-
         return cfg;
     }
 
@@ -91,8 +88,6 @@ public class GridCachePartitionsStateValidationTest extends GridCommonAbstractTe
     /** {@inheritDoc */
     @Override protected void afterTest() throws Exception {
         stopAllGrids();
-
-        clientMode = false;
     }
 
     /**
@@ -100,6 +95,7 @@ public class GridCachePartitionsStateValidationTest extends GridCommonAbstractTe
      *
      * @throws Exception If failed.
      */
+    @Test
     public void testValidationIfPartitionCountersAreInconsistent() throws Exception {
         IgniteEx ignite = (IgniteEx) startGrids(2);
         ignite.cluster().active(true);
@@ -132,8 +128,11 @@ public class GridCachePartitionsStateValidationTest extends GridCommonAbstractTe
      *
      * @throws Exception If failed.
      */
+    @Test
     public void testPartitionCountersConsistencyOnExchange() throws Exception {
-        IgniteEx ignite = (IgniteEx) startGrids(4);
+        // Reopen https://issues.apache.org/jira/browse/IGNITE-10766 if starts failing with forced MVCC
+
+        IgniteEx ignite = startGrids(4);
         ignite.cluster().active(true);
 
         awaitPartitionMapExchange();
@@ -141,11 +140,7 @@ public class GridCachePartitionsStateValidationTest extends GridCommonAbstractTe
         final String atomicCacheName = "atomic-cache";
         final String txCacheName = "tx-cache";
 
-        clientMode = true;
-
-        Ignite client = startGrid(4);
-
-        clientMode = false;
+        Ignite client = startClientGrid(4);
 
         IgniteCache atomicCache = client.getOrCreateCache(new CacheConfiguration<>(atomicCacheName)
             .setAtomicityMode(CacheAtomicityMode.ATOMIC)

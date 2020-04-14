@@ -600,7 +600,7 @@ public class BinaryUtils {
         if (type != null)
             return type;
 
-        if (isEnum(cls))
+        if (U.isEnum(cls))
             return GridBinaryMarshaller.ENUM;
 
         if (cls.isArray())
@@ -656,7 +656,6 @@ public class BinaryUtils {
      * @param map Map.
      * @return New map of the same type or null.
      */
-    @SuppressWarnings("unchecked")
     public static <K, V> Map<K, V> newKnownMap(Object map) {
         Class<?> cls = map == null ? null : map.getClass();
 
@@ -748,7 +747,6 @@ public class BinaryUtils {
      * @param col Collection.
      * @return New empty collection.
      */
-    @SuppressWarnings("unchecked")
     public static <V> Collection<V> newKnownCollection(Object col) {
         Class<?> cls = col == null ? null : col.getClass();
 
@@ -958,10 +956,30 @@ public class BinaryUtils {
      * @throws BinaryObjectException If merge failed due to metadata conflict.
      */
     public static BinaryMetadata mergeMetadata(@Nullable BinaryMetadata oldMeta, BinaryMetadata newMeta) {
+        return mergeMetadata(oldMeta, newMeta, null);
+    }
+
+    /**
+     * Merge old and new metas.
+     *
+     * @param oldMeta Old meta.
+     * @param newMeta New meta.
+     * @param changedSchemas Set for holding changed schemas.
+     * @return New meta if old meta was null, old meta if no changes detected, merged meta otherwise.
+     * @throws BinaryObjectException If merge failed due to metadata conflict.
+     */
+    public static BinaryMetadata mergeMetadata(@Nullable BinaryMetadata oldMeta, BinaryMetadata newMeta,
+        @Nullable Set<Integer> changedSchemas) {
         assert newMeta != null;
 
-        if (oldMeta == null)
+        if (oldMeta == null) {
+            if (changedSchemas != null) {
+                for (BinarySchema schema : newMeta.schemas())
+                    changedSchemas.add(schema.schemaId());
+            }
+
             return newMeta;
+        }
         else {
             assert oldMeta.typeId() == newMeta.typeId();
 
@@ -1023,10 +1041,11 @@ public class BinaryUtils {
 
                     if (!F.eq(oldFieldTypeName, newFieldTypeName)) {
                         throw new BinaryObjectException(
-                            "Binary type has different field types [" + "typeName=" + oldMeta.typeName() +
-                                ", fieldName=" + newField.getKey() +
-                                ", fieldTypeName1=" + oldFieldTypeName +
-                                ", fieldTypeName2=" + newFieldTypeName + ']'
+                            "Type '" + oldMeta.typeName() + "' with typeId " + oldMeta.typeId()
+                                + " has a different/incorrect type for field '" + newField.getKey()
+                                + "'. Expected '" + oldFieldTypeName + "' but '" + newFieldTypeName
+                                + "' was provided. Field type's modification is unsupported, clean {root_path}/marshaller " +
+                                "and {root_path}/binary_meta directories if the type change is required."
                         );
                     }
                 }
@@ -1036,8 +1055,12 @@ public class BinaryUtils {
             Collection<BinarySchema> mergedSchemas = new HashSet<>(oldMeta.schemas());
 
             for (BinarySchema newSchema : newMeta.schemas()) {
-                if (mergedSchemas.add(newSchema))
+                if (mergedSchemas.add(newSchema)) {
                     changed = true;
+
+                    if (changedSchemas != null)
+                        changedSchemas.add(newSchema.schemaId());
+                }
             }
 
             // Return either old meta if no changes detected, or new merged meta.
@@ -1050,7 +1073,6 @@ public class BinaryUtils {
      * @param cls Class.
      * @return Mode.
      */
-    @SuppressWarnings("IfMayBeConditional")
     public static BinaryWriteMode mode(Class<?> cls) {
         assert cls != null;
 
@@ -1141,7 +1163,7 @@ public class BinaryUtils {
             return BinaryWriteMode.COL;
         else if (isSpecialMap(cls))
             return BinaryWriteMode.MAP;
-        else if (isEnum(cls))
+        else if (U.isEnum(cls))
             return BinaryWriteMode.ENUM;
         else if (cls == BinaryEnumObjectImpl.class)
             return BinaryWriteMode.BINARY_ENUM;
@@ -1172,21 +1194,6 @@ public class BinaryUtils {
      */
     public static boolean isSpecialMap(Class cls) {
         return HashMap.class.equals(cls) || LinkedHashMap.class.equals(cls);
-    }
-
-    /**
-     * Check if class represents a Enum.
-     *
-     * @param cls Class.
-     * @return {@code True} if this is a Enum class.
-     */
-    public static boolean isEnum(Class cls) {
-        if (cls.isEnum())
-            return true;
-
-        Class sCls = cls.getSuperclass();
-
-        return sCls != null && sCls.isEnum();
     }
 
     /**
@@ -1628,7 +1635,7 @@ public class BinaryUtils {
         Class cls;
 
         if (typeId != GridBinaryMarshaller.UNREGISTERED_TYPE_ID)
-            cls = ctx.descriptorForTypeId(true, typeId, ldr, true).describedClass();
+            cls = ctx.descriptorForTypeId(true, typeId, ldr, false).describedClass();
         else {
             String clsName = doReadClassName(in);
 
@@ -1639,8 +1646,7 @@ public class BinaryUtils {
                 throw new BinaryInvalidTypeException("Failed to load the class: " + clsName, e);
             }
 
-            // forces registering of class by type id, at least locally
-            ctx.descriptorForClass(cls, true);
+            ctx.registerClass(cls, false, false);
         }
 
         return cls;
@@ -1656,11 +1662,11 @@ public class BinaryUtils {
      * @return Resovled class.
      */
     public static Class resolveClass(BinaryContext ctx, int typeId, @Nullable String clsName,
-        @Nullable ClassLoader ldr, boolean deserialize) {
+        @Nullable ClassLoader ldr, boolean registerMeta) {
         Class cls;
 
         if (typeId != GridBinaryMarshaller.UNREGISTERED_TYPE_ID)
-            cls = ctx.descriptorForTypeId(true, typeId, ldr, deserialize).describedClass();
+            cls = ctx.descriptorForTypeId(true, typeId, ldr, registerMeta).describedClass();
         else {
             try {
                 cls = U.forName(clsName, ldr);
@@ -1669,8 +1675,7 @@ public class BinaryUtils {
                 throw new BinaryInvalidTypeException("Failed to load the class: " + clsName, e);
             }
 
-            // forces registering of class by type id, at least locally
-            ctx.descriptorForClass(cls, true);
+            ctx.registerClass(cls, false, false);
         }
 
         return cls;
@@ -1710,7 +1715,7 @@ public class BinaryUtils {
     private static Object[] doReadBinaryEnumArray(BinaryInputStream in, BinaryContext ctx) {
         int len = in.readInt();
 
-        Object[] arr = (Object[])Array.newInstance(BinaryObject.class, len);
+        Object[] arr = (Object[])Array.newInstance(BinaryEnumObjectImpl.class, len);
 
         for (int i = 0; i < len; i++) {
             byte flag = in.readByte();

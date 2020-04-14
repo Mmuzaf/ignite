@@ -1,27 +1,31 @@
 /*
-* Licensed to the Apache Software Foundation (ASF) under one or more
-* contributor license agreements.  See the NOTICE file distributed with
-* this work for additional information regarding copyright ownership.
-* The ASF licenses this file to You under the Apache License, Version 2.0
-* (the "License"); you may not use this file except in compliance with
-* the License.  You may obtain a copy of the License at
-*
-*      http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS,
-* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific language governing permissions and
-* limitations under the License.
-*/
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.ignite.internal.processors.cache.persistence.db.wal;
 
 import java.io.File;
 import java.io.FilenameFilter;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.file.Paths;
 import java.util.Arrays;
-import java.util.Comparator;
+import java.util.Set;
+import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteCache;
+import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.cache.CacheAtomicityMode;
 import org.apache.ignite.cache.CacheWriteSynchronizationMode;
 import org.apache.ignite.cache.affinity.rendezvous.RendezvousAffinityFunction;
@@ -32,23 +36,26 @@ import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.configuration.WALMode;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.pagemem.FullPageId;
+import org.apache.ignite.internal.pagemem.wal.IgniteWriteAheadLogManager;
+import org.apache.ignite.internal.pagemem.wal.record.CheckpointRecord;
 import org.apache.ignite.internal.pagemem.wal.record.PageSnapshot;
-import org.apache.ignite.internal.processors.cache.persistence.wal.FileWriteAheadLogManager;
+import org.apache.ignite.internal.pagemem.wal.record.RolloverType;
+import org.apache.ignite.internal.processors.cache.persistence.DummyPageIO;
+import org.apache.ignite.internal.processors.cache.persistence.IgniteCacheDatabaseSharedManager;
+import org.apache.ignite.internal.processors.cache.persistence.wal.FileDescriptor;
+import org.apache.ignite.internal.util.GridUnsafe;
 import org.apache.ignite.internal.util.typedef.internal.U;
-import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.TcpDiscoveryIpFinder;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
+import org.apache.ignite.testframework.GridTestUtils;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
+import org.junit.Test;
 
-import static org.apache.ignite.configuration.DataStorageConfiguration.DFLT_PAGE_SIZE;
+import static java.util.stream.Collectors.toSet;
+import static org.apache.ignite.internal.processors.cache.persistence.file.FilePageStoreManager.ZIP_SUFFIX;
 
 /**
  *
  */
 public class WalCompactionTest extends GridCommonAbstractTest {
-    /** Ip finder. */
-    private static final TcpDiscoveryIpFinder IP_FINDER = new TcpDiscoveryVmIpFinder(true);
-
     /** Wal segment size. */
     private static final int WAL_SEGMENT_SIZE = 4 * 1024 * 1024;
 
@@ -64,16 +71,22 @@ public class WalCompactionTest extends GridCommonAbstractTest {
     /** Wal mode. */
     private WALMode walMode;
 
+    /** */
+    private static class RolloverRecord extends CheckpointRecord {
+        /** */
+        private RolloverRecord() {
+            super(null);
+        }
+    }
+
     /** {@inheritDoc} */
     @Override protected IgniteConfiguration getConfiguration(String name) throws Exception {
         IgniteConfiguration cfg = super.getConfiguration(name);
 
-        cfg.setDiscoverySpi(new TcpDiscoverySpi().setIpFinder(IP_FINDER));
-
         cfg.setDataStorageConfiguration(new DataStorageConfiguration()
             .setDefaultDataRegionConfiguration(new DataRegionConfiguration()
                 .setPersistenceEnabled(true)
-                .setMaxSize(200 * 1024 * 1024))
+                .setMaxSize(200L * 1024 * 1024))
             .setWalMode(walMode)
             .setWalSegmentSize(WAL_SEGMENT_SIZE)
             .setWalHistorySize(500)
@@ -81,7 +94,7 @@ public class WalCompactionTest extends GridCommonAbstractTest {
 
         CacheConfiguration ccfg = new CacheConfiguration();
 
-        ccfg.setName("cache");
+        ccfg.setName(CACHE_NAME);
         ccfg.setAtomicityMode(CacheAtomicityMode.TRANSACTIONAL);
         ccfg.setWriteSynchronizationMode(CacheWriteSynchronizationMode.FULL_SYNC);
         ccfg.setAffinity(new RendezvousAffinityFunction(false, 16));
@@ -91,6 +104,16 @@ public class WalCompactionTest extends GridCommonAbstractTest {
         cfg.setConsistentId(name);
 
         return cfg;
+    }
+
+    /** {@inheritDoc} */
+    @Override protected void beforeTestsStarted() throws Exception {
+        super.beforeTestsStarted();
+    }
+
+    /** {@inheritDoc} */
+    @Override protected void afterTestsStopped() throws Exception {
+        super.afterTestsStopped();
     }
 
     /** {@inheritDoc} */
@@ -112,13 +135,38 @@ public class WalCompactionTest extends GridCommonAbstractTest {
     }
 
     /**
+     * Tests applying updates from compacted WAL archive.
+     *
      * @throws Exception If failed.
      */
+    @Test
     public void testApplyingUpdatesFromCompactedWal() throws Exception {
+        testApplyingUpdatesFromCompactedWal(false);
+    }
+
+    /**
+     * Tests applying updates from compacted WAL archive when compressor is disabled.
+     *
+     * @throws Exception If failed.
+     */
+    @Test
+    public void testApplyingUpdatesFromCompactedWalWhenCompressorDisabled() throws Exception {
+        testApplyingUpdatesFromCompactedWal(true);
+    }
+
+    /**
+     * @param switchOffCompressor Switch off compressor after restart.
+     * @throws Exception If failed.
+     */
+    private void testApplyingUpdatesFromCompactedWal(boolean switchOffCompressor) throws Exception {
         IgniteEx ig = (IgniteEx)startGrids(3);
+
+        ig.cluster().baselineAutoAdjustEnabled(false);
         ig.cluster().active(true);
 
-        IgniteCache<Integer, byte[]> cache = ig.cache("cache");
+        IgniteCache<Integer, byte[]> cache = ig.cache(CACHE_NAME);
+
+        final int pageSize = ig.cachex(CACHE_NAME).context().dataRegion().pageMemory().pageSize();
 
         for (int i = 0; i < ENTRIES; i++) { // At least 20MB of raw data in total.
             final byte[] val = new byte[20000];
@@ -128,15 +176,17 @@ public class WalCompactionTest extends GridCommonAbstractTest {
             cache.put(i, val);
         }
 
+        byte[] dummyPage = dummyPage(pageSize);
+
         // Spam WAL to move all data records to compressible WAL zone.
-        for (int i = 0; i < WAL_SEGMENT_SIZE / DFLT_PAGE_SIZE * 2; i++)
-            ig.context().cache().context().wal().log(new PageSnapshot(new FullPageId(-1, -1), new byte[DFLT_PAGE_SIZE]));
+        for (int i = 0; i < WAL_SEGMENT_SIZE / pageSize * 2; i++) {
+            ig.context().cache().context().wal().log(new PageSnapshot(new FullPageId(-1, -1), dummyPage,
+                pageSize));
+        }
 
         // WAL archive segment is allowed to be compressed when it's at least one checkpoint away from current WAL head.
         ig.context().cache().context().database().wakeupForCheckpoint("Forced checkpoint").get();
         ig.context().cache().context().database().wakeupForCheckpoint("Forced checkpoint").get();
-
-        Thread.sleep(15_000); // Allow compressor to compress WAL segments.
 
         String nodeFolderName = ig.context().pdsFolderResolver().resolveFolders().folderName();
 
@@ -144,9 +194,11 @@ public class WalCompactionTest extends GridCommonAbstractTest {
         File walDir = new File(dbDir, "wal");
         File archiveDir = new File(walDir, "archive");
         File nodeArchiveDir = new File(archiveDir, nodeFolderName);
-        File walSegment = new File(nodeArchiveDir, FileWriteAheadLogManager.FileDescriptor.fileName(0) + ".zip");
+        File walSegment = new File(nodeArchiveDir, FileDescriptor.fileName(0) + ZIP_SUFFIX);
 
-        assertTrue(walSegment.exists());
+        // Allow compressor to compress WAL segments.
+        assertTrue(GridTestUtils.waitForCondition(walSegment::exists, 15_000));
+
         assertTrue(walSegment.length() < WAL_SEGMENT_SIZE / 2); // Should be compressed at least in half.
 
         stopAllGrids();
@@ -171,6 +223,8 @@ public class WalCompactionTest extends GridCommonAbstractTest {
 
         for (File f : lfsFiles)
             f.delete();
+
+        compactionEnabled = !switchOffCompressor;
 
         ig = (IgniteEx)startGrids(3);
 
@@ -197,11 +251,26 @@ public class WalCompactionTest extends GridCommonAbstractTest {
         }
 
         assertFalse(fail);
+
+        // Check compation successfully reset on blt changed.
+        stopAllGrids();
+
+        Ignite ignite = startGrids(2);
+
+        ignite.cluster().active(true);
+
+        resetBaselineTopology();
+
+        // This node will join to different blt.
+        startGrid(2);
+
+        awaitPartitionMapExchange();
     }
 
     /**
      *
      */
+    @Test
     public void testCompressorToleratesEmptyWalSegmentsFsync() throws Exception {
         testCompressorToleratesEmptyWalSegments(WALMode.FSYNC);
     }
@@ -209,8 +278,75 @@ public class WalCompactionTest extends GridCommonAbstractTest {
     /**
      *
      */
+    @Test
     public void testCompressorToleratesEmptyWalSegmentsLogOnly() throws Exception {
         testCompressorToleratesEmptyWalSegments(WALMode.LOG_ONLY);
+    }
+
+    /**
+     *
+     */
+    @Test
+    public void testOptimizedWalSegments() throws Exception {
+        IgniteConfiguration icfg = getConfiguration(getTestIgniteInstanceName(0));
+
+        icfg.getDataStorageConfiguration().setWalSegmentSize(300_000_000);
+        icfg.getDataStorageConfiguration().setWalSegments(2);
+
+        IgniteEx ig = (IgniteEx)startGrid(getTestIgniteInstanceName(0), optimize(icfg), null);
+
+        ig.cluster().active(true);
+
+        IgniteCache<Integer, byte[]> cache = ig.cache(CACHE_NAME);
+
+        for (int i = 0; i < 2500; i++) { // At least 50MB of raw data in total.
+            final byte[] val = new byte[20000];
+
+            val[i] = 1;
+
+            cache.put(i, val);
+        }
+
+        IgniteWriteAheadLogManager walMgr = ig.context().cache().context().wal();
+
+        IgniteCacheDatabaseSharedManager dbMgr = ig.context().cache().context().database();
+
+        RolloverRecord rec = new RolloverRecord();
+
+        try {
+            dbMgr.checkpointReadLock();
+
+            try {
+                walMgr.log(rec, RolloverType.NEXT_SEGMENT);
+            }
+            finally {
+                dbMgr.checkpointReadUnlock();
+            }
+        }
+        catch (IgniteCheckedException e) {
+            log.error(e.getMessage(), e);
+        }
+
+        long start = System.currentTimeMillis();
+
+        do {
+            Thread.yield();
+        }
+        while (walMgr.lastArchivedSegment() < 0 && (System.currentTimeMillis() - start < 15_000));
+
+        assertTrue(System.currentTimeMillis() - start < 15_000);
+
+        String nodeFolderName = ig.context().pdsFolderResolver().resolveFolders().folderName();
+
+        stopAllGrids();
+
+        File dbDir = U.resolveWorkDirectory(U.defaultWorkDirectory(), "db", false);
+        File walDir = new File(dbDir, "wal");
+        File archiveDir = new File(walDir, "archive");
+        File nodeArchiveDir = new File(archiveDir, nodeFolderName);
+        File walSegment = new File(nodeArchiveDir, FileDescriptor.fileName(0));
+
+        assertTrue("" + walSegment.length(), walSegment.length() < 200_000_000);
     }
 
     /**
@@ -223,7 +359,7 @@ public class WalCompactionTest extends GridCommonAbstractTest {
         IgniteEx ig = startGrid(0);
         ig.cluster().active(true);
 
-        IgniteCache<Integer, byte[]> cache = ig.cache("cache");
+        IgniteCache<Integer, byte[]> cache = ig.cache(CACHE_NAME);
 
         for (int i = 0; i < 2500; i++) { // At least 50MB of raw data in total.
             final byte[] val = new byte[20000];
@@ -247,18 +383,32 @@ public class WalCompactionTest extends GridCommonAbstractTest {
         File walDir = new File(dbDir, "wal");
         File archiveDir = new File(walDir, "archive");
         File nodeArchiveDir = new File(archiveDir, nodeFolderName);
-        File walSegment = new File(nodeArchiveDir, FileWriteAheadLogManager.FileDescriptor.fileName(emptyIdx));
+        File walSegment = new File(nodeArchiveDir, FileDescriptor.fileName(emptyIdx));
+        File zippedWalSegment = new File(nodeArchiveDir, FileDescriptor.fileName(emptyIdx + 1) + ZIP_SUFFIX);
 
-        try (RandomAccessFile raf = new RandomAccessFile(walSegment, "rw")) {
-            raf.setLength(0); // Clear wal segment, but don't delete.
+        long start = U.currentTimeMillis();
+        do {
+            try (RandomAccessFile raf = new RandomAccessFile(walSegment, "rw")) {
+                raf.setLength(0); // Clear wal segment, but don't delete.
+            }
+
+            if (walSegment.length() == 0)
+                break;
+
+            if (U.currentTimeMillis() - start >= 10000)
+                throw new IgniteCheckedException("Can't trucate: " + walSegment.getAbsolutePath());
+
+            Thread.yield();
         }
+        while (true);
 
         compactionEnabled = true;
 
         ig = startGrid(0);
         ig.cluster().active(true);
 
-        Thread.sleep(15_000); // Allow compressor to compress WAL segments.
+        // Allow compressor to compress WAL segments.
+        assertTrue(GridTestUtils.waitForCondition(zippedWalSegment::exists, 15_000));
 
         File[] compressedSegments = nodeArchiveDir.listFiles(new FilenameFilter() {
             @Override public boolean accept(File dir, String name) {
@@ -276,17 +426,30 @@ public class WalCompactionTest extends GridCommonAbstractTest {
         System.out.println("Max compressed index: " + maxIdx);
         assertTrue(maxIdx > emptyIdx);
 
-        assertTrue(walSegment.exists()); // Failed to compress WAL segment shoudn't be deleted.
+        if (!walSegment.exists()) {
+            File[] list = nodeArchiveDir.listFiles();
+
+            Arrays.sort(list);
+
+            log.info("Files in archive:" + list.length);
+
+            for (File f : list)
+                log.info(f.getAbsolutePath());
+
+            // Failed to compress WAL segment shoudn't be deleted.
+            fail("File " + walSegment.getAbsolutePath() + " does not exist.");
+        }
     }
 
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testSeekingStartInCompactedSegment() throws Exception {
-        IgniteEx ig = (IgniteEx)startGrids(3);
+        IgniteEx ig = startGrids(3);
         ig.cluster().active(true);
 
-        IgniteCache<Integer, byte[]> cache = ig.cache("cache");
+        IgniteCache<Integer, byte[]> cache = ig.cache(CACHE_NAME);
 
         for (int i = 0; i < 100; i++) {
             final byte[] val = new byte[20000];
@@ -305,16 +468,9 @@ public class WalCompactionTest extends GridCommonAbstractTest {
         File nodeLfsDir = new File(dbDir, nodeFolderName);
         File cpMarkersDir = new File(nodeLfsDir, "cp");
 
-        final File[] cpMarkersToSave = cpMarkersDir.listFiles();
+        Set<String> cpMarkersToSave = Arrays.stream(cpMarkersDir.listFiles()).map(File::getName).collect(toSet());
 
-        assert cpMarkersToSave != null;
-        assertTrue(cpMarkersToSave.length >= 2);
-
-        Arrays.sort(cpMarkersToSave, new Comparator<File>() {
-            @Override public int compare(File o1, File o2) {
-                return o1.getName().compareTo(o2.getName());
-            }
-        });
+        assertTrue(cpMarkersToSave.size() >= 2);
 
         for (int i = 100; i < ENTRIES; i++) { // At least 20MB of raw data in total.
             final byte[] val = new byte[20000];
@@ -322,39 +478,40 @@ public class WalCompactionTest extends GridCommonAbstractTest {
             val[i] = 1;
 
             cache.put(i, val);
+
+            //It trigger checkout in the middle of put that it shifts 'keepUncompressedIdx'
+            // to allow the compressor to delete unzipped segments.
+            if (i % 100 == 0)
+                ig.context().cache().context().database().wakeupForCheckpoint("Forced checkpoint").get();
         }
 
+        final int pageSize = ig.cachex(CACHE_NAME).context().dataRegion().pageMemory().pageSize();
+
+        byte[] dummyPage = dummyPage(pageSize);
+
         // Spam WAL to move all data records to compressible WAL zone.
-        for (int i = 0; i < WAL_SEGMENT_SIZE / DFLT_PAGE_SIZE * 2; i++)
-            ig.context().cache().context().wal().log(new PageSnapshot(new FullPageId(-1, -1), new byte[DFLT_PAGE_SIZE]));
+        for (int i = 0; i < WAL_SEGMENT_SIZE / pageSize * 2; i++) {
+            ig.context().cache().context().wal().log(new PageSnapshot(new FullPageId(-1, -1), dummyPage,
+                pageSize));
+        }
 
         // WAL archive segment is allowed to be compressed when it's at least one checkpoint away from current WAL head.
         ig.context().cache().context().database().wakeupForCheckpoint("Forced checkpoint").get();
         ig.context().cache().context().database().wakeupForCheckpoint("Forced checkpoint").get();
 
-        Thread.sleep(15_000); // Allow compressor to compress WAL segments.
+        File nodeArchiveDir = dbDir.toPath().resolve(Paths.get("wal", "archive", nodeFolderName)).toFile();
+        File unzippedWalSegment = new File(nodeArchiveDir, FileDescriptor.fileName(0));
+        File walSegment = new File(nodeArchiveDir, FileDescriptor.fileName(0) + ZIP_SUFFIX);
 
-        File walDir = new File(dbDir, "wal");
-        File archiveDir = new File(walDir, "archive");
-        File nodeArchiveDir = new File(archiveDir, nodeFolderName);
-        File walSegment = new File(nodeArchiveDir, FileWriteAheadLogManager.FileDescriptor.fileName(0) + ".zip");
+        // Allow compressor to compress WAL segments.
+        assertTrue(GridTestUtils.waitForCondition(() -> !unzippedWalSegment.exists(), 15_000));
 
         assertTrue(walSegment.exists());
         assertTrue(walSegment.length() < WAL_SEGMENT_SIZE / 2); // Should be compressed at least in half.
 
         stopAllGrids();
 
-        File[] cpMarkers = cpMarkersDir.listFiles(new FilenameFilter() {
-            @Override public boolean accept(File dir, String name) {
-                return !(
-                    name.equals(cpMarkersToSave[0].getName()) ||
-                    name.equals(cpMarkersToSave[1].getName()) ||
-                    name.equals(cpMarkersToSave[2].getName()) ||
-                    name.equals(cpMarkersToSave[3].getName()) ||
-                    name.equals(cpMarkersToSave[4].getName())
-                );
-            }
-        });
+        File[] cpMarkers = cpMarkersDir.listFiles((dir, name) -> !cpMarkersToSave.contains(name));
 
         assertNotNull(cpMarkers);
         assertTrue(cpMarkers.length > 0);
@@ -372,7 +529,7 @@ public class WalCompactionTest extends GridCommonAbstractTest {
         for (File f : lfsFiles)
             f.delete();
 
-        ig = (IgniteEx)startGrids(3);
+        ig = startGrids(3);
 
         awaitPartitionMapExchange();
 
@@ -385,7 +542,7 @@ public class WalCompactionTest extends GridCommonAbstractTest {
                 missing++;
         }
 
-        System.out.println(">>> Missing " + missing + " entries logged before WAL iteration start");
+        log.info(">>> Missing " + missing + " entries logged before WAL iteration start");
         assertTrue(missing > 0);
 
         boolean fail = false;
@@ -395,17 +552,32 @@ public class WalCompactionTest extends GridCommonAbstractTest {
             byte[] arr = cache.get(i);
 
             if (arr == null) {
-                System.out.println(">>> Missing: " + i);
+                log.info(">>> Missing: " + i);
 
                 fail = true;
             }
             else if (arr[i] != 1) {
-                System.out.println(">>> Corrupted: " + i);
+                log.info(">>> Corrupted: " + i);
 
                 fail = true;
             }
         }
 
         assertFalse(fail);
+    }
+
+    /**
+     * @param pageSize Page size.
+     */
+    private static byte[] dummyPage(int pageSize) {
+        ByteBuffer pageBuf = ByteBuffer.allocateDirect(pageSize);
+
+        DummyPageIO.VERSIONS.latest().initNewPage(GridUnsafe.bufferAddress(pageBuf), -1, pageSize);
+
+        byte[] pageData = new byte[pageSize];
+
+        pageBuf.get(pageData);
+
+        return pageData;
     }
 }

@@ -24,6 +24,7 @@ import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.util.GridDebug;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
+import org.junit.Test;
 
 /**
  * Tests leaks on node restart with enabled persistence.
@@ -64,16 +65,13 @@ public class MemoryLeaksOnRestartNodeTest extends GridCommonAbstractTest {
 
     /** {@inheritDoc} */
     @Override protected void afterTestsStopped() throws Exception {
-        stopAllGrids();
-
         cleanPersistenceDir();
-
-        super.afterTestsStopped();
     }
 
     /**
      * @throws Exception On failed.
      */
+    @Test
     public void test() throws Exception {
         // Warmup
         for (int i = 0; i < RESTARTS / 2; ++i) {

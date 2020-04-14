@@ -30,6 +30,7 @@ namespace Apache.Ignite.Core.Tests.Cache.Query.Linq
     using System.Linq;
     using Apache.Ignite.Core.Cache;
     using Apache.Ignite.Core.Cache.Configuration;
+    using Apache.Ignite.Core.Common;
     using Apache.Ignite.Linq;
     using NUnit.Framework;
 
@@ -149,7 +150,7 @@ namespace Apache.Ignite.Core.Tests.Cache.Query.Linq
             TestConditionalWithNullableStructs<double>();
             TestConditionalWithNullableStructs<float>();
             TestConditionalWithNullableStructs<decimal>();
-            TestConditionalWithNullableStructs<DateTime>(DateTime.UtcNow);
+            TestConditionalWithNullableStructs<DateTime>(DateTime.Parse("1983-03-14 13:20:15.999999").ToUniversalTime());
 
             var charException = Assert.Throws<NotSupportedException>(() => TestConditionalWithNullableStructs<char>());
             Assert.AreEqual("Type is not supported for SQL mapping: System.Char", charException.Message);
@@ -237,7 +238,7 @@ namespace Apache.Ignite.Core.Tests.Cache.Query.Linq
         public void TestLocalQuery()
         {
             // Create partitioned cache
-            var cache = Ignition.GetIgnite().GetOrCreateCache<int, int>(new CacheConfiguration("partCache", 
+            var cache = Ignition.GetIgnite().GetOrCreateCache<int, int>(new CacheConfiguration("partCache",
                     new QueryEntity(typeof(int), typeof(int)))
                 {
                     SqlEscapeAll = GetSqlEscapeAll()
@@ -343,7 +344,12 @@ namespace Apache.Ignite.Core.Tests.Cache.Query.Linq
 
             // ReSharper disable once ReturnValueOfPureMethodIsNotUsed
             var ex = Assert.Throws<CacheException>(() =>
-                persons.SelectMany(p => GetRoleCache().AsCacheQueryable()).ToArray());
+            {
+                for (var i = 0; i < 100; i++)
+                {
+                    persons.SelectMany(p => GetRoleCache().AsCacheQueryable()).ToArray();
+                }
+            });
 
             Assert.IsTrue(ex.ToString().Contains("QueryCancelledException: The query was cancelled while executing."));
         }

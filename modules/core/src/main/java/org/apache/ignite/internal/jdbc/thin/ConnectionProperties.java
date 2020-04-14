@@ -19,6 +19,7 @@ package org.apache.ignite.internal.jdbc.thin;
 
 import java.sql.SQLException;
 import org.apache.ignite.internal.util.HostAndPortRange;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Provide access and manipulations with connection JDBC properties.
@@ -164,6 +165,16 @@ public interface ConnectionProperties {
     public void setSkipReducerOnUpdate(boolean skipReducerOnUpdate);
 
     /**
+     * @return Nested transactions handling strategy.
+     */
+    public String nestedTxMode();
+
+    /**
+     * @param nestedTxMode Nested transactions handling strategy.
+     */
+    public void nestedTxMode(String nestedTxMode);
+
+    /**
      * Gets SSL connection mode.
      *
      * @return Use SSL flag.
@@ -200,6 +211,22 @@ public interface ConnectionProperties {
      * @param sslProtocol SSL protocol name.
      */
     public void setSslProtocol(String sslProtocol);
+
+    /**
+     * Gets cipher suites.
+     *
+     * @return SSL cipher suites.
+     */
+    public String getSslCipherSuites();
+
+    /**
+     * Override default cipher suites.
+     *
+     * <p>See more at JSSE Reference Guide.
+     *
+     * @param sslCipherSuites SSL cipher suites.
+     */
+     public void setSslCipherSuites(String sslCipherSuites);
 
     /**
      * Gets algorithm that will be used to create a key manager.
@@ -382,4 +409,121 @@ public interface ConnectionProperties {
      * @return User's password.
      */
     public String getPassword();
+
+    /**
+     * @return {@code true} if data page scan support is enabled for this connection, {@code false} if it's disabled
+     *     and {@code null} for server default.
+     */
+    @Nullable public Boolean isDataPageScanEnabled();
+
+    /**
+     * @param dataPageScanEnabled {@code true} if data page scan support is enabled for this connection,
+     *     if {@code false} then it's disabled, if {@code null} then server should use its default settings.
+     */
+    public void setDataPageScanEnabled(@Nullable Boolean dataPageScanEnabled);
+
+    /**
+     * @return {@code true} if jdbc thin partition awareness is enabled for this connection,
+     * {@code false} if it's disabled.
+     */
+    public boolean isPartitionAwareness();
+
+    /**
+     * @param partitionAwareness {@code true} if jdbc thin partition awareness is enabled
+     * for this connection, if {@code false} then it's disabled.
+     */
+    public void setPartitionAwareness(boolean partitionAwareness);
+
+    /**
+     * Note: Batch size of 1 prevents deadlock on update where keys sequence are different in several concurrent updates.
+     *
+     * @return update internal bach size.
+     */
+    @Nullable public Integer getUpdateBatchSize();
+
+    /**
+     * Note: Set to 1 to prevent deadlock on update where keys sequence are different in several concurrent updates.
+     *
+     * @param updateBatchSize update internal bach size.
+     * @throws SQLException On error.
+     */
+    public void setUpdateBatchSize(@Nullable Integer updateBatchSize) throws SQLException;
+
+    /**
+     * @return SQL cache size that is used within partition awareness optimizations.
+     */
+    public int getPartitionAwarenessSqlCacheSize();
+
+    /**
+     * Sets SQL cache size that is used within partition awareness optimizations.
+     *
+     * @param partitionAwarenessSqlCacheSize SQL cache size.
+     * @throws SQLException On error.
+     */
+    public void setPartitionAwarenessSqlCacheSize(int partitionAwarenessSqlCacheSize) throws SQLException;
+
+    /**
+     * @return Partition distributions cache size that is used within partition awareness optimizations.
+     */
+    public int getPartitionAwarenessPartitionDistributionsCacheSize();
+
+    /**
+     * Sets partition distributions cache size that is used within partition awareness optimizations.
+     *
+     * @param partitionAwarenessPartDistributionsCacheSize Partition distributions cache size.
+     * @throws SQLException On error.
+     */
+    public void setPartitionAwarenessPartitionDistributionsCacheSize(
+        int partitionAwarenessPartDistributionsCacheSize) throws SQLException;
+
+    /**
+     * Note: zero value means there is no limits.
+     *
+     * @return Query timeout in seconds.
+     */
+    @Nullable public Integer getQueryTimeout();
+
+    /**
+     * Note: zero value means there is no limits.
+     *
+     * @param qryTimeout Query timeout in seconds.
+     */
+    public void setQueryTimeout(@Nullable Integer qryTimeout) throws SQLException;
+
+    /**
+     * Note: zero value means there is no limits.
+     *
+     * @return Connection timeout in milliseconds.
+     */
+    @Nullable public int getConnectionTimeout();
+
+    /**
+     * Note: zero value means there is no limits.
+     *
+     * @param connTimeout Connection timeout in milliseconds.
+     */
+    public void setConnectionTimeout(@Nullable Integer connTimeout) throws SQLException;
+
+    /**
+     * Gets the class name of the custom implementation of the Factory&lt;Map&lt;String, String&gt;&gt;.
+     *
+     * This factory should return user attributes which can be used on server node.
+     *
+     * @return Custom class name that implements Factory&lt;Map&lt;String, String&gt;&gt;.
+     */
+    public String getUserAttributesFactory();
+
+    /**
+     * Sets the class name of the custom implementation of the Factory&lt;Map&lt;String, String&gt;&gt;.
+     *
+     * This factory should return user attributes which can be used on server node.
+     *
+     * Sent attributes can be accessed on server nodes from
+     * {@link org.apache.ignite.internal.processors.rest.request.GridRestRequest GridRestRequest} or
+     * {@link org.apache.ignite.internal.processors.odbc.ClientListenerAbstractConnectionContext
+     * ClientListenerAbstractConnectionContext} (depends on client type).
+     *
+     * @param sslFactory Custom class name that implements Factory&lt;Map&lt;String, String&gt;&gt;.
+     */
+    public void setUserAttributesFactory(String sslFactory);
 }

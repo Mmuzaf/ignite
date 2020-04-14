@@ -79,6 +79,14 @@ namespace Apache.Ignite.Core.Impl.Binary
         }
 
         /// <summary>
+        /// Reads the nullable long.
+        /// </summary>
+        public static long? ReadLongNullable(this IBinaryRawReader reader)
+        {
+            return reader.ReadBoolean() ? reader.ReadLong() : (long?) null;
+        }
+
+        /// <summary>
         /// Reads the nullable bool.
         /// </summary>
         public static bool? ReadBooleanNullable(this IBinaryRawReader reader)
@@ -104,7 +112,7 @@ namespace Apache.Ignite.Core.Impl.Binary
         /// from org.apache.ignite.internal.processors.platform.utils package
         /// Note: return null if collection is empty
         /// </summary>
-        public static ICollection<T> ReadCollectionRaw<T, TReader>(this TReader reader,
+        public static IList<T> ReadCollectionRaw<T, TReader>(this TReader reader,
             Func<TReader, T> factory) where TReader : IBinaryRawReader
         {
             Debug.Assert(reader != null);

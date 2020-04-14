@@ -28,24 +28,16 @@ import org.apache.ignite.internal.processors.authentication.IgniteAccessControlE
 import org.apache.ignite.internal.processors.authentication.User;
 import org.apache.ignite.internal.processors.authentication.UserManagementException;
 import org.apache.ignite.internal.util.typedef.internal.U;
-import org.apache.ignite.spi.discovery.tcp.TcpDiscoverySpi;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.TcpDiscoveryIpFinder;
-import org.apache.ignite.spi.discovery.tcp.ipfinder.vm.TcpDiscoveryVmIpFinder;
 import org.apache.ignite.testframework.GridTestUtils;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
+import org.junit.Test;
 
 /**
  * Test for leaks JdbcConnection on SqlFieldsQuery execute.
  */
 public class SqlUserCommandSelfTest extends GridCommonAbstractTest {
-    /** */
-    private static final TcpDiscoveryIpFinder IP_FINDER = new TcpDiscoveryVmIpFinder(true);
-
     /** Nodes count. */
     private static final int NODES_COUNT = 3;
-
-    /** Client node. */
-    private static final int CLI_NODE = NODES_COUNT - 1;
 
     /** Authorization context for default user. */
     private AuthorizationContext actxDflt;
@@ -54,20 +46,15 @@ public class SqlUserCommandSelfTest extends GridCommonAbstractTest {
     @Override protected IgniteConfiguration getConfiguration(String igniteInstanceName) throws Exception {
         IgniteConfiguration cfg = super.getConfiguration(igniteInstanceName);
 
-        if (getTestIgniteInstanceIndex(igniteInstanceName) == CLI_NODE)
-            cfg.setClientMode(true);
-
-        TcpDiscoverySpi spi = new TcpDiscoverySpi();
-
-        spi.setIpFinder(IP_FINDER);
-
-        cfg.setDiscoverySpi(spi);
-
         cfg.setAuthenticationEnabled(true);
 
         cfg.setDataStorageConfiguration(new DataStorageConfiguration()
-            .setDefaultDataRegionConfiguration(new DataRegionConfiguration()
-                .setPersistenceEnabled(true)));
+            .setDefaultDataRegionConfiguration(
+                new DataRegionConfiguration()
+                    .setPersistenceEnabled(true)
+                    .setMaxSize(DataStorageConfiguration.DFLT_DATA_REGION_INITIAL_SIZE)
+            )
+        );
 
         return cfg;
     }
@@ -78,7 +65,9 @@ public class SqlUserCommandSelfTest extends GridCommonAbstractTest {
 
         U.resolveWorkDirectory(U.defaultWorkDirectory(), "db", true);
 
-        startGrids(NODES_COUNT);
+        startGrids(NODES_COUNT - 1);
+
+        startClientGrid(NODES_COUNT - 1);
 
         grid(0).cluster().active(true);
 
@@ -97,6 +86,7 @@ public class SqlUserCommandSelfTest extends GridCommonAbstractTest {
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testCreateUpdateDropUser() throws Exception {
         AuthorizationContext.context(actxDflt);
 
@@ -124,6 +114,7 @@ public class SqlUserCommandSelfTest extends GridCommonAbstractTest {
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testCreateWithAlreadyExistUser() throws Exception {
         AuthorizationContext.context(actxDflt);
         userSql(0, "CREATE USER test WITH PASSWORD 'test'");
@@ -144,6 +135,7 @@ public class SqlUserCommandSelfTest extends GridCommonAbstractTest {
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testAlterDropNotExistUser() throws Exception {
         AuthorizationContext.context(actxDflt);
 
@@ -171,6 +163,7 @@ public class SqlUserCommandSelfTest extends GridCommonAbstractTest {
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testNotAuthenticateOperation() throws Exception {
         for (int i = 0; i < NODES_COUNT; ++i) {
             final int idx = i;
@@ -204,6 +197,7 @@ public class SqlUserCommandSelfTest extends GridCommonAbstractTest {
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testNotAuthorizedOperation() throws Exception {
         AuthorizationContext.context(actxDflt);
 
@@ -246,6 +240,7 @@ public class SqlUserCommandSelfTest extends GridCommonAbstractTest {
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testDropDefaultUser() throws Exception {
         AuthorizationContext.context(actxDflt);
 
@@ -265,6 +260,7 @@ public class SqlUserCommandSelfTest extends GridCommonAbstractTest {
     /**
      * @throws Exception If failed.
      */
+    @Test
     public void testQuotedUsername() throws Exception {
         AuthorizationContext.context(actxDflt);
 
