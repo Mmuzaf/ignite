@@ -23,8 +23,10 @@ bundler_args: --retry 0
 #env:
 #  global:
 #    - JVM_EXTRA_ARGS="--illegal-access=permit --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED --add-exports=jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED --add-exports=java.base/sun.reflect.generics.reflectiveObjects=ALL-UNNAMED -Djdk.tls.client.protocols=TLSv1.2"
-
-script: "mvn install -P all-java,lgpl,examples,checkstyle,java-9+ -DskipTests -Dmaven.javadoc.skip=true -B -V"
+before_script:
+  - echo "MAVEN_OPTS='-Pall-java,lgpl,examples,checkstyle,java-9+'" > ~/.mavenrc
+  
+script: "mvn install -DskipTests -Dmaven.javadoc.skip=true -B -V"
 
 jdk:
   - openjdk11
