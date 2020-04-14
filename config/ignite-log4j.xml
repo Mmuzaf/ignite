@@ -120,7 +120,7 @@
     <!-- Default settings. -->
     <root>
         <!-- Print out all info by default. -->
-        <level value="INFO"/>
+        <level value="OFF"/>
 
         <!-- Uncomment to enable logging to console. -->
         <!--

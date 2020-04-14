@@ -1,0 +1,45 @@
+#language: java
+sudo: false
+#install: true
+
+#addons:
+#  sonarcloud:
+#    organization: "mmuzaf-github" # the key of the org you chose at step #3
+#    token:
+#      secure: ********* # encrypted value of your token
+#script:
+  # JaCoCo is used to have code coverage, the agent has to be activated.
+  # the following command line builds the project, runs the tests with coverage
+  # and then execute the SonarCloud analysis
+  #- mvn clean org.jacoco:jacoco-maven-plugin:prepare-agent install sonar:sonar -P surefire-fork-count-1 -Dsonar.login=${SONARQUBE_TOKEN}
+
+#script: "mvn cobertura:cobertura -P test"
+
+#after_success:
+#  - bash <(curl -s https://codecov.io/bash) -t 6c7e8599-8bb3-40db-bbb6-02f533e0acd1
+
+bundler_args: --retry 0
+
+#env:
+#  global:
+#    - JVM_EXTRA_ARGS="--illegal-access=permit --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED --add-exports=jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED --add-exports=java.base/sun.reflect.generics.reflectiveObjects=ALL-UNNAMED -Djdk.tls.client.protocols=TLSv1.2"
+
+#before_script:
+#  - echo "MAVEN_OPTS='-Pall-java,lgpl,examples,checkstyle,java-9+'" > ~/.mavenrc
+  
+script: "mvn install -P all-java,lgpl,examples,checkstyle,java-8 -DskipTests -Dmaven.javadoc.skip=true -B -V"
+
+jdk:
+  - openjdk8
+
+cache:
+  directories:
+    - '$HOME/.m2/repository'
+    - '$HOME/.sonar/cache'
+
+# Don't copy the following part if your usnig this project as a starting point of yours
+#notifications:
+#  email: false
+#  webhooks:
+#    - secure: "YnouVsvmF9gDFMT9s8MQsHe5ARaO78SvNeU+MzGKB+l7we7Xge5Zmi6J1KOuOW7zoKkb/wCnUvs+wu9qr4K0VgmWb2wBOpO2c5p85GrSYjPKGwfeZHSmGUpHUoNeDNa32StbTn7oOqtisTbcCWAM3fCPK/HW2l6Mh6eLSsqrlXwCYek2NWWfNeWX0tw22ctMGX6c2I200mGtU3SxPLvzg6MC9AbJ5/VnMkr0tzJnJdQWFGP6Iv6kNBb982tijbdBiriUX6964IPC4XSboK/KFRoHEfxaQuB8rcc64ar4Yr0UIB7Cz2DY4hKi6XaC5RT0O10rfFbCf6UInpzsz2CC4ZMU2Tpnpew/Y7VxhDBXLdq3pkvZS8UXj9J5ivaTJeCIidfoxw7NF8ctPtgIvUI5SoC1V7bjMPTvTTFz7vqtvCUZbAecQgM88MKGyYPD2g4HxzGL7vCGfPSOCMsxySemBkBElqPvDRVLrDNNPJNEkUZ/yQxaFCZpITPD787MyKjeI9NlkG3htZ+i8t2BYmQj28JzoADY+wsdufK8WlkWANISfFyEzyo+JlOoXGX/gfHWpWhaWn3klIDm8LED3FM4/wNRT6yg8BZ1BEQ6D6RSG5SrhYwJPRr6bFzh7MA3+mkO7GW5SVZNVX2Q0qmigmKd6cJBGD3/V0r74LtwRH+sKxI="
+#  on_start: always
