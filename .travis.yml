@@ -18,7 +18,7 @@ sudo: false
 #after_success:
 #  - bash <(curl -s https://codecov.io/bash) -t 6c7e8599-8bb3-40db-bbb6-02f533e0acd1
 
-script: "mvn surefire:test -P all-java,scala-2.10 -pl :ignite-core -am -Dmaven.test.failure.ignore=true -DfailIfNoTests=false -Dtest=IgniteCacheTestSuite6 -Dmaven.javadoc.skip=true"
+script: "mvn clean package -DskipTests -Dmaven.javadoc.skip=true -Pall-java,all-scala,scala,lgpl,examples,checkstyle"
 
 jdk:
   - oraclejdk8
