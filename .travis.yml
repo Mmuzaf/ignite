@@ -18,6 +18,8 @@ sudo: false
 #after_success:
 #  - bash <(curl -s https://codecov.io/bash) -t 6c7e8599-8bb3-40db-bbb6-02f533e0acd1
 
+bundler_args: --retry 0
+
 #env:
 #  global:
 #    - JVM_EXTRA_ARGS="--illegal-access=permit --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED --add-exports=jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED --add-exports=java.base/sun.reflect.generics.reflectiveObjects=ALL-UNNAMED -Djdk.tls.client.protocols=TLSv1.2"
