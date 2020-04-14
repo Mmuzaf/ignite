@@ -27,10 +27,10 @@ bundler_args: --retry 0
 #before_script:
 #  - echo "MAVEN_OPTS='-Pall-java,lgpl,examples,checkstyle,java-9+'" > ~/.mavenrc
   
-script: "mvn install -P all-java,lgpl,examples,checkstyle,java-9+ -DskipTests -Dmaven.javadoc.skip=true -B -V"
+script: "mvn install -P all-java,lgpl,examples,checkstyle,java-8 -DskipTests -Dmaven.javadoc.skip=true -B -V"
 
 jdk:
-  - openjdk11
+  - openjdk8
 
 cache:
   directories:
