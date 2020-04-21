@@ -27,10 +27,10 @@ jobs:
         - echo $TRAVIS_JDK_VERSION
         - echo $JDK_PROFILES
         - |
-          if [ "${TRAVIS_JDK_VERSION:-}" == "8" ]; then
+          if [ "${TRAVIS_JDK_VERSION:-}" == "openjdk8" ]; then
               JDK_PROFILES='-Pall-scala,scala';
               DEFAULT_CONFIG=config/default-config.xml
-          elif [ "${TRAVIS_JDK_VERSION:-}" == "11" ] ; then
+          elif [ "${TRAVIS_JDK_VERSION:-}" == "openjdk11" ] ; then
               JDK_PROFILES='-P!spark-2.4,!spark,!scala'
               JVM_EXTRA_ARGS='--illegal-access=permit
                     --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
