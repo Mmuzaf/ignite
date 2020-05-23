@@ -43,6 +43,9 @@ import org.apache.ignite.testframework.LogListener;
  * Tests for log print for long running query.
  */
 public class WarningOnBigQueryResultsBaseTest extends AbstractIndexingCommonTest {
+    /** Client ignite instance name prefix. */
+    protected static final String CLI_NAME = "cli";
+
     /** Keys count. */
     protected static final int KEYS_PER_NODE = 1000;
 
@@ -97,9 +100,8 @@ public class WarningOnBigQueryResultsBaseTest extends AbstractIndexingCommonTest
                     .setNodeFilter((IgnitePredicate<ClusterNode>)node ->
                         node.attribute(TEST1_ATTR) != null && (boolean)node.attribute(TEST1_ATTR)));
 
-        if (igniteInstanceName.startsWith("cli")) {
-            cfg.setClientMode(true)
-                .setClientConnectorConfiguration(new ClientConnectorConfiguration()
+        if (igniteInstanceName.startsWith(CLI_NAME)) {
+            cfg.setClientConnectorConfiguration(new ClientConnectorConfiguration()
                     .setPort(CLI_PORT));
         }
         else {
@@ -127,7 +129,7 @@ public class WarningOnBigQueryResultsBaseTest extends AbstractIndexingCommonTest
         startGrid(0);
 
         // The client must be connected to grid0 according with test plan.
-        startGrid("cli");
+        startClientGrid(CLI_NAME);
 
         // Starts other server nodes.
         startGrid(1);
@@ -168,7 +170,7 @@ public class WarningOnBigQueryResultsBaseTest extends AbstractIndexingCommonTest
     @Override protected void beforeTest() throws Exception {
         super.beforeTest();
 
-        setBigResultThreshold(grid("cli"), 10, 3);
+        setBigResultThreshold(grid(CLI_NAME), 10, 3);
 
         setBigResultThreshold(grid(0), 10, 3);
         setBigResultThreshold(grid(1), 25, 2);

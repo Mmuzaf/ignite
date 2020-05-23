@@ -58,7 +58,7 @@ public class WarningOnBigQueryResultsTest extends WarningOnBigQueryResultsBaseTe
         setBigResultThreshold(grid(3), 0, 0);
 
         assertEquals(KEYS_PER_NODE * 2,
-            grid("cli").context().query().querySqlFields(new SqlFieldsQueryEx("SELECT * FROM TEST0", true)
+            grid(CLI_NAME).context().query().querySqlFields(new SqlFieldsQueryEx("SELECT * FROM TEST0", true)
                     .setSchema("TEST0"),
                 false).getAll().size());
 
@@ -68,7 +68,7 @@ public class WarningOnBigQueryResultsTest extends WarningOnBigQueryResultsBaseTe
         assertEquals(0, listener(grid(3)).messageCount());
 
         assertEquals(KEYS_PER_NODE * 2,
-            grid("cli").context().query().querySqlFields(new SqlFieldsQueryEx("SELECT * FROM TEST1", true)
+            grid(CLI_NAME).context().query().querySqlFields(new SqlFieldsQueryEx("SELECT * FROM TEST1", true)
                     .setSchema("TEST1"),
                 false).getAll().size());
 
@@ -83,7 +83,7 @@ public class WarningOnBigQueryResultsTest extends WarningOnBigQueryResultsBaseTe
         setBigResultThreshold(grid(3), -1, -1);
 
         assertEquals(KEYS_PER_NODE * 2,
-            grid("cli").context().query().querySqlFields(new SqlFieldsQueryEx("SELECT * FROM TEST0", true)
+            grid(CLI_NAME).context().query().querySqlFields(new SqlFieldsQueryEx("SELECT * FROM TEST0", true)
                     .setSchema("TEST0"),
                 false).getAll().size());
 
@@ -93,7 +93,7 @@ public class WarningOnBigQueryResultsTest extends WarningOnBigQueryResultsBaseTe
         assertEquals(0, listener(grid(3)).messageCount());
 
         assertEquals(KEYS_PER_NODE * 2,
-            grid("cli").context().query().querySqlFields(new SqlFieldsQueryEx("SELECT * FROM TEST1", true)
+            grid(CLI_NAME).context().query().querySqlFields(new SqlFieldsQueryEx("SELECT * FROM TEST1", true)
                     .setSchema("TEST1"),
                 false).getAll().size());
 
@@ -108,22 +108,22 @@ public class WarningOnBigQueryResultsTest extends WarningOnBigQueryResultsBaseTe
     @Test
     public void testQueryCacheTest0() throws Exception {
         assertEquals(KEYS_PER_NODE * 2,
-            grid("cli").context().query().querySqlFields(
+            grid(CLI_NAME).context().query().querySqlFields(
                 new SqlFieldsQueryEx("SELECT * FROM TEST0 ORDER BY val DESC", true)
                     .setSchema("TEST0"),
                 false).getAll().size());
 
-        assertEquals(6, listener(grid("cli")).messageCount());
-        assertEquals(Arrays.asList(10L, 30L, 90L, 270L, 810L, 2000L), listener(grid("cli")).fetched);
+        assertEquals(6, listener(grid(CLI_NAME)).messageCount());
+        assertEquals(Arrays.asList(10L, 30L, 90L, 270L, 810L, 2000L), listener(grid(CLI_NAME)).fetched);
 
-        checkDurations(listener(grid("cli")).duration);
+        checkDurations(listener(grid(CLI_NAME)).duration);
 
-        assertEquals("REDUCE", listener(grid("cli")).type);
-        assertEquals("TEST0", listener(grid("cli")).schema);
+        assertEquals("REDUCE", listener(grid(CLI_NAME)).type);
+        assertEquals("TEST0", listener(grid(CLI_NAME)).schema);
 
-        assertFalse(listener(grid("cli")).enforceJoinOrder);
-        assertFalse(listener(grid("cli")).distributedJoin);
-        assertFalse(listener(grid("cli")).lazy);
+        assertFalse(listener(grid(CLI_NAME)).enforceJoinOrder);
+        assertFalse(listener(grid(CLI_NAME)).distributedJoin);
+        assertFalse(listener(grid(CLI_NAME)).lazy);
 
         checkStateAfterQuery0("TEST0");
     }
@@ -132,7 +132,7 @@ public class WarningOnBigQueryResultsTest extends WarningOnBigQueryResultsBaseTe
      */
     @Test
     public void testQueryInsideCompute() throws Exception {
-        List<List<?>> res = grid("cli").compute(grid("cli").cluster().forNode(grid(0).localNode())).call(
+        List<List<?>> res = grid(CLI_NAME).compute(grid(CLI_NAME).cluster().forNode(grid(0).localNode())).call(
             new IgniteCallable<List<List<?>>>() {
                 @IgniteInstanceResource
                 Ignite ign;
@@ -152,7 +152,7 @@ public class WarningOnBigQueryResultsTest extends WarningOnBigQueryResultsBaseTe
     @Test
     public void testQueryCacheTest1() throws Exception {
         assertEquals(KEYS_PER_NODE * 2,
-            grid("cli").context().query().querySqlFields(new SqlFieldsQueryEx("SELECT * FROM TEST1", true)
+            grid(CLI_NAME).context().query().querySqlFields(new SqlFieldsQueryEx("SELECT * FROM TEST1", true)
                     .setSchema("TEST1")
                     .setLazy(true)
                     .setEnforceJoinOrder(true),

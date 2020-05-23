@@ -30,17 +30,16 @@ import org.junit.Test;
  * Tests if node maps are correct for caches created on client node join.
  */
 public class ClientCreateCacheGroupOnJoinNodeMapsTest extends GridCommonAbstractTest {
+    /** Client ignite instance name prefix. */
+    private static final String CLI_NAME = "client";
+
     /** {@inheritDoc} */
     @Override protected IgniteConfiguration getConfiguration(String igniteInstanceName) throws Exception {
         final IgniteConfiguration cfg = super.getConfiguration(igniteInstanceName);
 
         cfg.setActiveOnStart(false);
 
-        boolean client = "client".equals(igniteInstanceName);
-
-        cfg.setClientMode(client);
-
-        if (client) {
+        if (CLI_NAME.equals(igniteInstanceName)) {
             cfg.setCacheConfiguration(defaultCacheConfiguration().setNearConfiguration(null).
                 setAffinity(new RendezvousAffinityFunction(false, 32)));
         }
@@ -73,7 +72,7 @@ public class ClientCreateCacheGroupOnJoinNodeMapsTest extends GridCommonAbstract
 
         awaitPartitionMapExchange();
 
-        final IgniteEx client = startGrid("client");
+        startClientGrid(CLI_NAME);
 
         final GridDhtPartitionTopology top0 = grid(0).cachex(DEFAULT_CACHE_NAME).context().topology();
         final GridDhtPartitionTopology top1 = grid(1).cachex(DEFAULT_CACHE_NAME).context().topology();
