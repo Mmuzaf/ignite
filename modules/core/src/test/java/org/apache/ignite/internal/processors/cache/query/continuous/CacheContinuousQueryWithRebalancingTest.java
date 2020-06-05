@@ -13,6 +13,7 @@ import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.apache.ignite.transactions.Transaction;
+import org.junit.After;
 import org.junit.Test;
 
 /**
@@ -30,6 +31,11 @@ public class CacheContinuousQueryWithRebalancingTest extends GridCommonAbstractT
                 .setBackups(1)
                 .setCacheMode(CacheMode.PARTITIONED)
                 .setName(DEFAULT_CACHE_NAME));
+    }
+
+    @After
+    public void clean() {
+        stopAllGrids();
     }
 
     /** @throws Exception If fails. */
