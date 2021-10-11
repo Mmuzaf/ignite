@@ -1,0 +1,77 @@
+SYNOPSIS
+
+  ignite baseline SUBCOMMAND [OPTIONS] [ARG...]
+  ignite baseline [-h|--help|-V|--version]
+
+DESCRIPTION
+
+  Baseline topology commands.
+
+OPTIONS
+
+  -h, --help                  - show this help message and exit.
+
+  -V, --version               - print version information and exit.
+
+SUBCOMMANDS
+
+  add <consistentId1,...>     - to add a list of nodes to the baseline topology, run the command given below. After the node
+                                is added, the rebalancing process starts.
+
+  remove <consistentId1,...>  - to remove a list of nodes from the baseline topology, use the remove command. Only offline nodes
+                                can  be removed from the baseline topology: shut down the node first and then use the remove command.
+                                This operation starts the rebalancing process, which re-distributes the data across the nodes
+                                that remain in the baseline topology.
+
+  set                         - to set new baseline topology
+
+                                  --version <topology>             - to set the baseline topology by specifying the desired version
+                                                                     of the baseline topology.
+
+                                  -n, --nodes <consistentId1,...>  - to set the baseline topology by either providing a list of
+                                                                     nodes (consistent IDs).
+
+  list                        - to get the list of nodes registered in the baseline topology. The output contains the current
+                                topology version, the list of consistent IDs of the nodes included in the baseline topology,
+                                and the list of nodes that joined the cluster but were not added to the baseline topology.
+
+  auto_adjust                 - baseline topology autoadjustment refers to automatic update of baseline topology after the
+                                topology has been stable for a specific amount of time. For in-memory clusters, autoadjustment
+                                is enabled by default with the timeout set to 0. It means that baseline topology changes
+                                immediately after server nodes join or leave the cluster. For clusters with persistence,
+                                the automatic baseline adjustment is disabled by default.
+
+                                  -e, --enable   - to enable autoadjustment
+
+                                  -t, --timeout  - a timeout is set in milliseconds. The baseline is set to the current
+                                                   topology when a given number of milliseconds has passed after the last
+                                                   JOIN/LEFT/FAIL event. Every new JOIN/LEFT/FAIL event restarts the timeout
+                                                   countdown.
+
+EXIT STATUS
+
+       0      Successful program execution.
+
+       1      Usage, syntax or configuration file error.
+
+       2      Operational error.
+
+       3      A child process returned a non-zero exit status.
+
+       16     At least one of the pages/files/keywords didn't exist or
+              wasn't matched.
+
+COPYRIGHT
+
+       Licensed to the Apache Software Foundation (ASF) under one or more
+       contributor license agreements.  See the NOTICE file distributed with
+       this work for additional information regarding copyright ownership.
+       The ASF licenses this file to You under the Apache License, Version 2.0
+       (the "License"); you may not use this file except in compliance with
+       the License.  You may obtain a copy of the License at
+            http://www.apache.org/licenses/LICENSE-2.0
+       Unless required by applicable law or agreed to in writing, software
+       distributed under the License is distributed on an "AS IS" BASIS,
+       WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+       See the License for the specific language governing permissions and
+       limitations under the License.
