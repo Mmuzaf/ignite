@@ -18,17 +18,15 @@
 
 package org.apache.ignite.internal.management;
 
+import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
-
-import static java.lang.annotation.ElementType.FIELD;
-import static java.lang.annotation.ElementType.METHOD;
 
 /**
  *
  */
 @Retention(java.lang.annotation.RetentionPolicy.RUNTIME)
-@Target({ FIELD, METHOD })
+@Target({ ElementType.FIELD, ElementType.METHOD })
 public @interface Parameter {
   /**
    * An array of allowed command line parameters (e.g. "-d", "--outputdir", etc...).

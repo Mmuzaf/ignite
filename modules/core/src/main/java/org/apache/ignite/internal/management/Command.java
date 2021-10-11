@@ -60,7 +60,7 @@ import java.lang.annotation.Target;
  * </ul>
  */
 @Retention(RetentionPolicy.RUNTIME)
-@Target({ElementType.TYPE})
+@Target(ElementType.TYPE)
 public @interface Command {
     /**
      * An array of allowed command names.
