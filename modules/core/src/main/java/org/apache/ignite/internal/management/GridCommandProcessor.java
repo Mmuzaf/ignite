@@ -18,21 +18,15 @@
 
 package org.apache.ignite.internal.management;
 
-import org.apache.ignite.lang.IgniteCallable;
-import org.apache.ignite.lang.IgniteReducer;
-import org.jetbrains.annotations.Nullable;
+import org.apache.ignite.internal.GridKernalContext;
+import org.apache.ignite.internal.processors.GridProcessorAdapter;
 
-/**
- * @param <T>
- */
-public interface IgniteCommand<T> extends IgniteCallable<T>, IgniteReducer<T, T> {
-    /** {@inheritDoc} */
-    @Override public default boolean collect(@Nullable T t) {
-        return true;
-    }
-
-    /** {@inheritDoc} */
-    @Override public default T reduce() {
-        return null;
+/** */
+public class GridCommandProcessor extends GridProcessorAdapter {
+    /**
+     * @param ctx Kernal context.
+     */
+    protected GridCommandProcessor(GridKernalContext ctx) {
+        super(ctx);
     }
 }
