@@ -1,12 +1,12 @@
-package org.apache.ignite.internal.management.baseline;
+package org.apache.ignite.internal.processors.management.baseline;
 
 import java.util.Collection;
 import java.util.List;
 import org.apache.ignite.cluster.BaselineNode;
 import org.apache.ignite.cluster.ClusterNode;
 import org.apache.ignite.internal.IgniteEx;
-import org.apache.ignite.internal.management.Command;
-import org.apache.ignite.internal.management.Parameter;
+import org.apache.ignite.internal.processors.management.Command;
+import org.apache.ignite.internal.processors.management.Parameter;
 import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.lang.IgniteCallable;
 import org.apache.ignite.lang.IgnitePredicate;

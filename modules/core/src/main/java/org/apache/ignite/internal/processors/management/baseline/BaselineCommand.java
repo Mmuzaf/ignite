@@ -1,10 +1,10 @@
-package org.apache.ignite.internal.management.baseline;
+package org.apache.ignite.internal.processors.management.baseline;
 
 import java.util.Collection;
 import org.apache.ignite.cluster.BaselineNode;
 import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.cluster.IgniteClusterEx;
-import org.apache.ignite.internal.management.Command;
+import org.apache.ignite.internal.processors.management.Command;
 import org.apache.ignite.internal.processors.cluster.baseline.autoadjust.BaselineAutoAdjustStatus;
 import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.lang.IgniteCallable;

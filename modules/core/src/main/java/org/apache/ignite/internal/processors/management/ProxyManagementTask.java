@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.ignite.internal.management;
+package org.apache.ignite.internal.processors.management;
 
 import java.util.List;
 import java.util.Map;

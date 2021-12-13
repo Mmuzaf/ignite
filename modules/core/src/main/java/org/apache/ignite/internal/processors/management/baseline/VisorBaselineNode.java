@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.ignite.internal.management.baseline;
+package org.apache.ignite.internal.processors.management.baseline;
 
 import java.io.IOException;
 import java.io.ObjectInput;
