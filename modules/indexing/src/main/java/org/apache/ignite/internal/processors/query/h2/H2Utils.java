@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+
 import javax.cache.CacheException;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
@@ -196,7 +197,10 @@ public class H2Utils {
      * @return SQL.
      */
     public static String tableCreateSql(H2TableDescriptor tbl) {
-        GridQueryProperty keyProp = tbl.type().property(KEY_FIELD_NAME);
+        String keyFieldName = tbl.type().keyFieldName();
+        GridQueryProperty keyByNameProp = (keyFieldName == null) ? null : tbl.type().property(keyFieldName);
+        GridQueryProperty keyProp = (keyByNameProp == null) ? tbl.type().property(KEY_FIELD_NAME) : keyByNameProp;
+
         GridQueryProperty valProp = tbl.type().property(VAL_FIELD_NAME);
 
         String keyType = dbTypeFromClass(tbl.type().keyClass(),
@@ -325,7 +329,7 @@ public class H2Utils {
 
             Method fctMethod = fctCls.getMethod("createIndex", GridH2Table.class, String.class, List.class);
 
-            return (GridH2IndexBase) fctMethod.invoke(null, tbl, idxName, cols);
+            return (GridH2IndexBase)fctMethod.invoke(null, tbl, idxName, cols);
         }
         catch (Exception e) {
             throw new IgniteException("Failed to instantiate: " + SPATIAL_IDX_CLS, e);
@@ -909,7 +913,10 @@ public class H2Utils {
 
             GridCacheContext cctx = sharedCtx.cacheContext(cacheId);
 
-            assert cctx != null;
+            if (cctx == null) {
+                throw new IgniteSQLException("Failed to find cache [cacheId=" + cacheId + ']',
+                    IgniteQueryErrorCode.TABLE_NOT_FOUND);
+            }
 
             if (i == 0) {
                 mvccEnabled = cctx.mvccEnabled();
@@ -945,7 +952,10 @@ public class H2Utils {
 
             GridCacheContext cctx = sharedCtx.cacheContext(cacheId);
 
-            assert cctx != null;
+            if (cctx == null) {
+                throw new IgniteSQLException("Failed to find cache [cacheId=" + cacheId + ']',
+                    IgniteQueryErrorCode.TABLE_NOT_FOUND);
+            }
 
             if (!cctx.isPartitioned())
                 continue;

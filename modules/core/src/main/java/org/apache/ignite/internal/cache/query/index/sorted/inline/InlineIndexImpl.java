@@ -83,14 +83,11 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
     }
 
     /** {@inheritDoc} */
-    @Override public GridCursor<IndexRow> find(IndexRow lower, IndexRow upper, int segment) throws IgniteCheckedException {
-        return find(lower, upper, segment, null);
-    }
-
-    /** {@inheritDoc} */
     @Override public GridCursor<IndexRow> find(
         IndexRow lower,
         IndexRow upper,
+        boolean lowIncl,
+        boolean upIncl,
         int segment,
         IndexQueryContext qryCtx
     ) throws IgniteCheckedException {
@@ -106,7 +103,7 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
             return new SingleCursor<>(row);
         }
 
-        return segments[segment].find(lower, upper, closure, null);
+        return segments[segment].find(lower, upper, lowIncl, upIncl, closure, null);
     }
 
     /** {@inheritDoc} */
@@ -183,7 +180,7 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
             if (!(v1 != null && v2 != null))
                 return false;
 
-            if (def.rowComparator().compareKey((IndexRow) r1, (IndexRow) r2, i) != 0)
+            if (def.rowComparator().compareRow(r1, r2, i) != 0)
                 return false;
         }
 
