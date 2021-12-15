@@ -41,6 +41,9 @@ import org.jetbrains.annotations.Nullable;
 @GridInternal
 @GridVisorManagementTask
 public class ProxyManagementTask implements ComputeTask<String, String> {
+    /** Serial version uid. */
+    private static final long serialVersionUID = 0L;
+
     /** Auto-injected ignite instance. */
     @IgniteInstanceResource
     protected transient IgniteEx ignite;

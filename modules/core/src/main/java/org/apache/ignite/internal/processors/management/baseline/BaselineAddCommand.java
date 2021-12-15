@@ -16,6 +16,9 @@ import org.apache.ignite.resources.IgniteInstanceResource;
 @Command(name = "add",
     commandDescription = "Add nodes to baseline topology.")
 public class BaselineAddCommand implements IgniteCallable<String> {
+    /** Serial version uid. */
+    private static final long serialVersionUID = 0L;
+
     /** Auto-injected Ignite instance. */
     @IgniteInstanceResource
     private IgniteEx ignite;
