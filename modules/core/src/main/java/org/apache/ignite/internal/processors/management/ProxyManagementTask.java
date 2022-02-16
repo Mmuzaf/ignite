@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.IgniteLogger;
+import org.apache.ignite.binary.BinaryObject;
 import org.apache.ignite.cluster.ClusterNode;
 import org.apache.ignite.compute.ComputeJob;
 import org.apache.ignite.compute.ComputeJobResult;
@@ -40,7 +41,7 @@ import org.jetbrains.annotations.Nullable;
  */
 @GridInternal
 @GridVisorManagementTask
-public class ProxyManagementTask implements ComputeTask<String, String> {
+public class ProxyManagementTask implements ComputeTask<Map<String, String[]>, BinaryObject> {
     /** Serial version uid. */
     private static final long serialVersionUID = 0L;
 
@@ -56,7 +57,7 @@ public class ProxyManagementTask implements ComputeTask<String, String> {
     protected boolean debug;
 
     /** Task argument. */
-    protected String arg;
+    protected Map<String, String[]> arg;
 
     /** Task start time. */
     protected long start;
@@ -64,7 +65,7 @@ public class ProxyManagementTask implements ComputeTask<String, String> {
     /** {@inheritDoc} */
     @Override public @NotNull Map<? extends ComputeJob, ClusterNode> map(
         List<ClusterNode> subgrid,
-        @Nullable String arg
+        @Nullable Map<String, String[]> arg
     ) throws IgniteException {
         this.arg = arg;
 
@@ -77,7 +78,7 @@ public class ProxyManagementTask implements ComputeTask<String, String> {
     }
 
     /** {@inheritDoc} */
-    @Override public @Nullable String reduce(List<ComputeJobResult> results) throws IgniteException {
+    @Override public @Nullable BinaryObject reduce(List<ComputeJobResult> results) throws IgniteException {
         return null;
     }
 }

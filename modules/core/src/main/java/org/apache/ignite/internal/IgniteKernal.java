@@ -159,6 +159,7 @@ import org.apache.ignite.internal.processors.failure.FailureProcessor;
 import org.apache.ignite.internal.processors.job.GridJobProcessor;
 import org.apache.ignite.internal.processors.jobmetrics.GridJobMetricsProcessor;
 import org.apache.ignite.internal.processors.localtask.DurableBackgroundTasksProcessor;
+import org.apache.ignite.internal.processors.management.IgniteManagementProcessor;
 import org.apache.ignite.internal.processors.marshaller.GridMarshallerMappingProcessor;
 import org.apache.ignite.internal.processors.metastorage.persistence.DistributedMetaStorageImpl;
 import org.apache.ignite.internal.processors.metric.GridMetricManager;
@@ -1096,6 +1097,7 @@ public class IgniteKernal implements IgniteEx, Externalizable {
             scheduler = new IgniteSchedulerImpl(ctx);
 
             startProcessor(rsrcProc);
+            startProcessor(new IgniteManagementProcessor(ctx));
 
             // Inject resources into lifecycle beans.
             if (!cfg.isDaemon() && cfg.getLifecycleBeans() != null) {

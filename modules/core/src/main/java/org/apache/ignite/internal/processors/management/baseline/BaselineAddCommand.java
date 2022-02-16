@@ -2,6 +2,7 @@ package org.apache.ignite.internal.processors.management.baseline;
 
 import java.util.Collection;
 import java.util.List;
+import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.cluster.BaselineNode;
 import org.apache.ignite.cluster.ClusterNode;
 import org.apache.ignite.internal.IgniteEx;
@@ -11,6 +12,7 @@ import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.lang.IgniteCallable;
 import org.apache.ignite.lang.IgnitePredicate;
 import org.apache.ignite.resources.IgniteInstanceResource;
+import org.apache.ignite.resources.LoggerResource;
 
 /** */
 @Command(name = "add",
@@ -22,6 +24,10 @@ public class BaselineAddCommand implements IgniteCallable<String> {
     /** Auto-injected Ignite instance. */
     @IgniteInstanceResource
     private IgniteEx ignite;
+
+    /** Logger. */
+    @LoggerResource
+    private IgniteLogger log;
 
     /** Parameter will be injected on command instantiation. Default comma separation. */
     @Parameter(names = {"--nodes", "-n"}, description = "List of baseline nodes to add.")
@@ -46,6 +52,9 @@ public class BaselineAddCommand implements IgniteCallable<String> {
         }
 
         ignite.cluster().setBaselineTopology(baseline);
+
+        if (log.isInfoEnabled())
+            log.info("Baseline add command executed successfully: " + consistentIds.toString());
 
         return consistentIds.toString();
     }

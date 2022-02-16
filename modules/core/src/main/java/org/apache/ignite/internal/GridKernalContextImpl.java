@@ -75,6 +75,7 @@ import org.apache.ignite.internal.processors.failure.FailureProcessor;
 import org.apache.ignite.internal.processors.job.GridJobProcessor;
 import org.apache.ignite.internal.processors.jobmetrics.GridJobMetricsProcessor;
 import org.apache.ignite.internal.processors.localtask.DurableBackgroundTasksProcessor;
+import org.apache.ignite.internal.processors.management.IgniteManagementProcessor;
 import org.apache.ignite.internal.processors.marshaller.GridMarshallerMappingProcessor;
 import org.apache.ignite.internal.processors.metastorage.DistributedMetaStorage;
 import org.apache.ignite.internal.processors.metric.GridMetricManager;
@@ -215,6 +216,10 @@ public class GridKernalContextImpl implements GridKernalContext, Externalizable 
     /** */
     @GridToStringInclude
     private GridResourceProcessor rsrcProc;
+
+    /** */
+    @GridToStringInclude
+    private IgniteManagementProcessor mgtProc;
 
     /** */
     @GridToStringInclude
@@ -520,6 +525,8 @@ public class GridKernalContextImpl implements GridKernalContext, Externalizable 
             timeProc = (GridTimeoutProcessor)comp;
         else if (comp instanceof GridResourceProcessor)
             rsrcProc = (GridResourceProcessor)comp;
+        else if (comp instanceof IgniteManagementProcessor)
+            mgtProc = (IgniteManagementProcessor)comp;
         else if (comp instanceof GridJobMetricsProcessor)
             jobMetricsProc = (GridJobMetricsProcessor)comp;
         else if (comp instanceof GridMetricManager)
@@ -667,6 +674,11 @@ public class GridKernalContextImpl implements GridKernalContext, Externalizable 
     /** {@inheritDoc} */
     @Override public GridResourceProcessor resource() {
         return rsrcProc;
+    }
+
+    /** {@inheritDoc} */
+    @Override public IgniteManagementProcessor management() {
+        return mgtProc;
     }
 
     /** {@inheritDoc} */

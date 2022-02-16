@@ -36,12 +36,12 @@ public @interface Parameter {
   String[] names() default {};
 
   /**
-   * A description of this option.
+   * A description of this parameter.
    */
   String description() default "";
 
   /**
-   * Whether this option is required.
+   * Whether this parameter is required.
    */
   boolean required() default false;
 
@@ -72,7 +72,7 @@ public @interface Parameter {
    * specify a {@code type} attribute to control the Class that the option parameter should be converted to.
    * @return the type(s) to convert the raw String values
    */
-  Class<?>[] type() default {};
+//  Class<?>[] type() default {};
 
 //    /**
 //     * Optionally specify one or more {@link ITypeConverter} classes to use to convert the command line argument into

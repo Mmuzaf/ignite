@@ -63,14 +63,9 @@ import java.lang.annotation.Target;
 @Target(ElementType.TYPE)
 public @interface Command {
     /**
-     * An array of allowed command names.
+     * Command name.
      */
     String name();
-
-    /**
-     * Alternative command names by which this subcommand is recognized on the command line.
-     */
-    String[] aliases() default {};
 
     /**
      * A list of classes to instantiate and register as subcommands. When registering subcommands declaratively
@@ -87,22 +82,4 @@ public @interface Command {
      * The characters that separate options, spaces are also supported.
      */
     String separator() default "=";
-
-    /**
-     * Set the values to be displayed in the exit codes section as a list of {@code "key:value"} pairs:
-     * keys are exit codes, values are descriptions. Descriptions may contain {@code "%n"} line separators.
-     * <p>For example:</p>
-     * <pre>
-     * &#064;Command(exitCodeListHeading = "Exit Codes:%n",
-     *          exitCodeList = { " 0:Successful program execution.",
-     *                           "64:Invalid input: an unknown option or invalid parameter was specified.",
-     *                           "70:Execution exception: an exception occurred while executing the business logic."})
-     * </pre>
-     */
-    String[] exitCodeList() default {};
-
-    /**
-     * The name of the resource bundle to use for this class.
-     */
-    String resourceBundle() default "";
 }
