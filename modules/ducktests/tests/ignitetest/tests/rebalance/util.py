@@ -97,13 +97,13 @@ def start_ignite(test_context, ignite_version: str, rebalance_params: RebalanceP
     :param rebalance_params: Rebalance parameters.
     :return: IgniteService.
     """
-    node_count = len(test_context.cluster) - rebalance_params.preloaders
+    node_count = test_context.available_cluster_size - rebalance_params.preloaders
 
     if rebalance_params.persistent:
         data_storage = DataStorageConfiguration(
             max_wal_archive_size=2 * rebalance_params.data_region_max_size,
             default=DataRegionConfiguration(
-                persistent=True,
+                persistence_enabled=True,
                 max_size=rebalance_params.data_region_max_size
             )
         )
@@ -115,7 +115,7 @@ def start_ignite(test_context, ignite_version: str, rebalance_params: RebalanceP
     node_config = IgniteConfiguration(
         version=IgniteVersion(ignite_version),
         data_storage=data_storage,
-        metric_exporter="org.apache.ignite.spi.metric.jmx.JmxMetricExporterSpi",
+        metric_exporters={"org.apache.ignite.spi.metric.jmx.JmxMetricExporterSpi"},
         rebalance_thread_pool_size=rebalance_params.thread_pool_size,
         rebalance_batch_size=rebalance_params.batch_size,
         rebalance_batches_prefetch_count=rebalance_params.batches_prefetch_count,

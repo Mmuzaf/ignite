@@ -37,6 +37,8 @@ import org.apache.ignite.IgniteException;
 import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.IgniteSystemProperties;
 import org.apache.ignite.binary.BinaryInvalidTypeException;
+import org.apache.ignite.cache.CacheWriteSynchronizationMode;
+import org.apache.ignite.cache.ReadRepairStrategy;
 import org.apache.ignite.cluster.ClusterNode;
 import org.apache.ignite.internal.IgniteInternalFuture;
 import org.apache.ignite.internal.NodeStoppingException;
@@ -83,7 +85,6 @@ import org.apache.ignite.internal.processors.cache.distributed.near.GridNearGetR
 import org.apache.ignite.internal.processors.cache.distributed.near.GridNearSingleGetRequest;
 import org.apache.ignite.internal.processors.cache.distributed.near.GridNearSingleGetResponse;
 import org.apache.ignite.internal.processors.cache.distributed.near.consistency.GridNearReadRepairCheckOnlyFuture;
-import org.apache.ignite.internal.processors.cache.distributed.near.consistency.IgniteConsistencyViolationException;
 import org.apache.ignite.internal.processors.cache.dr.GridCacheDrExpirationInfo;
 import org.apache.ignite.internal.processors.cache.dr.GridCacheDrInfo;
 import org.apache.ignite.internal.processors.cache.persistence.CacheDataRow;
@@ -123,6 +124,7 @@ import org.jetbrains.annotations.Nullable;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_ATOMIC_DEFERRED_ACK_BUFFER_SIZE;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_ATOMIC_DEFERRED_ACK_TIMEOUT;
 import static org.apache.ignite.cache.CacheWriteSynchronizationMode.FULL_ASYNC;
+import static org.apache.ignite.cache.CacheWriteSynchronizationMode.FULL_SYNC;
 import static org.apache.ignite.cache.CacheWriteSynchronizationMode.PRIMARY_SYNC;
 import static org.apache.ignite.events.EventType.EVT_CACHE_OBJECT_PUT;
 import static org.apache.ignite.events.EventType.EVT_CACHE_OBJECT_READ;
@@ -372,15 +374,15 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
             ctx.cacheId(),
             GridDhtAtomicNearResponse.class,
             new CI2<UUID, GridDhtAtomicNearResponse>() {
-            @Override public void apply(UUID uuid, GridDhtAtomicNearResponse msg) {
-                processDhtAtomicNearResponse(uuid, msg);
-            }
+                @Override public void apply(UUID uuid, GridDhtAtomicNearResponse msg) {
+                    processDhtAtomicNearResponse(uuid, msg);
+                }
 
-            @Override public String toString() {
-                return "GridDhtAtomicNearResponse handler " +
-                    "[msgIdx=" + GridDhtAtomicNearResponse.CACHE_MSG_IDX + ']';
-            }
-        });
+                @Override public String toString() {
+                    return "GridDhtAtomicNearResponse handler " +
+                        "[msgIdx=" + GridDhtAtomicNearResponse.CACHE_MSG_IDX + ']';
+                }
+            });
 
         ctx.io().addCacheHandler(
             ctx.cacheId(),
@@ -474,7 +476,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
         final ExpiryPolicy expiryPlc = skipVals ? null : opCtx != null ? opCtx.expiry() : null;
         final boolean skipStore = opCtx != null && opCtx.skipStore();
         final boolean recovery = opCtx != null && opCtx.recovery();
-        final boolean readRepair = opCtx != null && opCtx.readRepair();
+        final ReadRepairStrategy readRepairStrategy = opCtx != null ? opCtx.readRepairStrategy() : null;
 
         return asyncOp(new CO<IgniteInternalFuture<V>>() {
             @Override public IgniteInternalFuture<V> apply() {
@@ -483,7 +485,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                     taskName,
                     deserializeBinary,
                     recovery,
-                    readRepair,
+                    readRepairStrategy,
                     expiryPlc,
                     skipVals,
                     skipStore,
@@ -498,13 +500,13 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
         boolean deserializeBinary,
         boolean needVer,
         boolean recovery,
-        boolean readRepair) throws IgniteCheckedException {
+        ReadRepairStrategy readRepairStrategy) throws IgniteCheckedException {
         return getAllAsyncInternal(keys,
             !ctx.config().isReadFromBackup(),
             ctx.kernalContext().job().currentTaskName(),
             deserializeBinary,
             recovery,
-            readRepair,
+            readRepairStrategy,
             false,
             needVer,
             false).get();
@@ -518,7 +520,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
         final String taskName,
         final boolean deserializeBinary,
         final boolean recovery,
-        final boolean readRepair,
+        final ReadRepairStrategy readRepairStrategy,
         final boolean skipVals,
         final boolean needVer
     ) {
@@ -527,7 +529,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
             taskName,
             deserializeBinary,
             recovery,
-            readRepair,
+            readRepairStrategy,
             skipVals,
             needVer,
             true);
@@ -538,7 +540,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
      * @param forcePrimary Force primary flag.
      * @param taskName Task name.
      * @param deserializeBinary Deserialize binary flag.
-     * @param readRepair Read Repair flag.
+     * @param readRepairStrategy Read Repair strategy.
      * @param skipVals Skip values flag.
      * @param needVer Need version flag.
      * @param asyncOp Async operation flag.
@@ -550,7 +552,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
         final String taskName,
         final boolean deserializeBinary,
         final boolean recovery,
-        final boolean readRepair,
+        final ReadRepairStrategy readRepairStrategy,
         final boolean skipVals,
         final boolean needVer,
         boolean asyncOp
@@ -576,7 +578,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                         taskName,
                         deserializeBinary,
                         recovery,
-                        readRepair,
+                        readRepairStrategy,
                         expiryPlc,
                         skipVals,
                         skipStore,
@@ -590,7 +592,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                 taskName,
                 deserializeBinary,
                 recovery,
-                readRepair,
+                readRepairStrategy,
                 expiryPlc,
                 skipVals,
                 skipStore,
@@ -1250,11 +1252,17 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
 
         CacheEntryPredicate[] filters = CU.filterArray(filter);
 
+        ReadRepairStrategy readRepairStrategy = opCtx != null ? opCtx.readRepairStrategy() : null;
+
+        // Providing the guarantee that all copies are updated when read repair operation is finished.
+        CacheWriteSynchronizationMode syncMode =
+            readRepairStrategy != null ? FULL_SYNC : ctx.config().getWriteSynchronizationMode();
+
         if (conflictPutVal == null && conflictRmvVer == null) {
             return new GridNearAtomicSingleUpdateFuture(
                 ctx,
                 this,
-                ctx.config().getWriteSynchronizationMode(),
+                syncMode,
                 op,
                 key,
                 val0,
@@ -1274,7 +1282,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
             return new GridNearAtomicUpdateFuture(
                 ctx,
                 this,
-                ctx.config().getWriteSynchronizationMode(),
+                syncMode,
                 op,
                 Collections.singletonList(key),
                 val0 != null ? Collections.singletonList(val0) : null,
@@ -1374,7 +1382,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
      * @param forcePrimary Force primary flag.
      * @param taskName Task name.
      * @param deserializeBinary Deserialize binary flag.
-     * @param readRepair Read Repair flag.
+     * @param readRepairStrategy Read Repair strategy.
      * @param expiryPlc Expiry policy.
      * @param skipVals Skip values flag.
      * @param skipStore Skip store flag.
@@ -1386,7 +1394,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
         String taskName,
         boolean deserializeBinary,
         boolean recovery,
-        boolean readRepair,
+        ReadRepairStrategy readRepairStrategy,
         @Nullable ExpiryPolicy expiryPlc,
         boolean skipVals,
         boolean skipStore,
@@ -1396,10 +1404,12 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
 
         IgniteCacheExpiryPolicy expiry = skipVals ? null : expiryPolicy(expiryPlc);
 
-        if (readRepair) {
+        if (readRepairStrategy != null) {
             return new GridNearReadRepairCheckOnlyFuture(
+                topVer,
                 ctx,
                 Collections.singleton(ctx.toCacheKeyObject(key)),
+                readRepairStrategy,
                 !skipStore,
                 taskName,
                 deserializeBinary,
@@ -1449,7 +1459,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
         String taskName,
         boolean deserializeBinary,
         boolean recovery,
-        boolean readRepair,
+        ReadRepairStrategy readRepairStrategy,
         @Nullable ExpiryPolicy expiryPlc,
         boolean skipVals,
         boolean skipStore,
@@ -1461,10 +1471,12 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
 
         final boolean evt = !skipVals;
 
-        if (readRepair) {
+        if (readRepairStrategy != null) {
             return new GridNearReadRepairCheckOnlyFuture(
+                topVer,
                 ctx,
                 ctx.cacheKeysView(keys),
+                readRepairStrategy,
                 !skipStore,
                 taskName,
                 deserializeBinary,
@@ -1712,20 +1724,6 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
         }
     }
 
-    /** {@inheritDoc} */
-    @Override protected IgniteInternalFuture<Void> repairAsync(Collection<? extends K> keys,
-        final CacheOperationContext opCtx, boolean skipVals) {
-        return new GridFinishedFuture<>(
-            new IgniteConsistencyViolationException("Consistency violation detected during Read Repair procedure."));
-    }
-
-    /** {@inheritDoc} */
-    @Override protected IgniteInternalFuture<Void> repairAsync(final K key, final CacheOperationContext opCtx,
-        boolean skipVals) {
-        return new GridFinishedFuture<>(
-            new IgniteConsistencyViolationException("Consistency violation detected during Read Repair procedure."));
-    }
-
     /**
      * @param nodeId Node ID.
      * @param req Update request.
@@ -1961,9 +1959,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
         GridNearAtomicUpdateResponse res,
         DhtAtomicUpdateResult dhtUpdRes,
         String taskName
-    )
-        throws GridCacheEntryRemovedException
-    {
+    ) throws GridCacheEntryRemovedException {
         GridDhtPartitionTopology top = topology();
 
         boolean hasNear = req.nearCache();
@@ -2199,7 +2195,8 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                                 ctx.cache().metrics0().onReadOnlyInvoke(old != null);
 
                             continue;
-                        } else {
+                        }
+                        else {
                             updatedVal = ctx.unwrapTemporary(invokeEntry.getValue());
 
                             updated = ctx.toCacheObject(updatedVal);
@@ -2547,6 +2544,8 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
 
                 Object writeVal = op == TRANSFORM ? req.entryProcessor(i) : req.writeValue(i);
 
+                boolean readRepairRecovery = op == TRANSFORM && req.entryProcessor(i) instanceof AtomicReadRepairEntryProcessor;
+
                 // Get readers before innerUpdate (reader cleared after remove).
                 GridDhtCacheEntry.ReaderId[] readers = entry.readersLocked();
 
@@ -2566,6 +2565,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                     /*metrics*/true,
                     /*primary*/true,
                     /*verCheck*/false,
+                    readRepairRecovery,
                     topVer,
                     req.filter(),
                     replicate ? DR_PRIMARY : DR_NONE,
@@ -2602,7 +2602,8 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                             sndPrevVal,
                             updRes.oldValue(),
                             updRes.updateCounter(),
-                            op);
+                            op,
+                            readRepairRecovery);
 
                         if (readers != null)
                             dhtFut.addNearWriteEntries(
@@ -2612,7 +2613,8 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                                 updRes.newValue(),
                                 entryProcessor,
                                 updRes.newTtl(),
-                                updRes.conflictExpireTime());
+                                updRes.conflictExpireTime(),
+                                readRepairRecovery);
                     }
                     else {
                         if (log.isDebugEnabled())
@@ -2830,6 +2832,8 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                     EntryProcessor<Object, Object, Object> entryProcessor =
                         entryProcessorMap == null ? null : entryProcessorMap.get(entry.key());
 
+                    boolean readRepairRecovery = op == TRANSFORM && req.entryProcessor(i) instanceof AtomicReadRepairEntryProcessor;
+
                     GridCacheUpdateAtomicResult updRes = entry.innerUpdate(
                         ver,
                         nearNode.id(),
@@ -2846,6 +2850,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                         /*metrics*/true,
                         /*primary*/true,
                         /*verCheck*/false,
+                        readRepairRecovery,
                         topVer,
                         null,
                         replicate ? DR_PRIMARY : DR_NONE,
@@ -2883,7 +2888,6 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                     dhtUpdRes.addDeleted(entry, updRes, entries);
 
                     if (dhtFut != null) {
-
                         dhtFut.addWriteEntry(
                             affAssignment,
                             entry,
@@ -2895,7 +2899,8 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                             sndPrevVal,
                             updRes.oldValue(),
                             updRes.updateCounter(),
-                            op);
+                            op,
+                            readRepairRecovery);
 
                         if (readers != null)
                             dhtFut.addNearWriteEntries(
@@ -2905,7 +2910,8 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                                 writeVal,
                                 entryProcessor,
                                 updRes.newTtl(),
-                                CU.EXPIRE_TIME_CALCULATE);
+                                CU.EXPIRE_TIME_CALCULATE,
+                                readRepairRecovery);
                     }
 
                     if (hasNear) {
@@ -3313,6 +3319,7 @@ public class GridDhtAtomicCache<K, V> extends GridDhtCacheAdapter<K, V> {
                                 /*metrics*/true,
                                 /*primary*/false,
                                 /*check version*/!req.forceTransformBackups(),
+                                req.readRepairRecovery(),
                                 req.topologyVersion(),
                                 CU.empty0(),
                                 replicate ? DR_BACKUP : DR_NONE,

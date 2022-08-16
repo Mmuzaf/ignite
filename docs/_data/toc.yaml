@@ -221,6 +221,8 @@
       url: transactions/mvcc
     - title: SQL Statistics
       url: SQL/sql-statistics
+    - title: Calcite-based SQL Engine
+      url: SQL/sql-calcite
 - title: SQL Reference
   url: sql-reference/sql-reference-overview
   items:
@@ -366,8 +368,6 @@
       url: data-structures/atomic-types
     - title: CountDownLatch 
       url: data-structures/countdownlatch
-    - title: Atomic Sequence 
-      url: data-structures/atomic-sequence
     - title:  Semaphore 
       url: data-structures/semaphore
     - title: ID Generator
@@ -513,8 +513,6 @@
           url: extensions-and-integrations/ignite-for-spark/spark-shell
         - title: Troubleshooting
           url: extensions-and-integrations/ignite-for-spark/troubleshooting
-    - title: Hibernate L2 Cache
-      url: extensions-and-integrations/hibernate-l2-cache
     - title: MyBatis L2 Cache
       url: extensions-and-integrations/mybatis-l2-cache
     - title: Streaming
@@ -553,6 +551,10 @@
       url: extensions-and-integrations/php-pdo
     - title: Performance Statistics
       url: extensions-and-integrations/performance-statistics
+    - title: Change Data Capture
+      url: extensions-and-integrations/change-data-capture-extensions
+    - title: ZooKeeper IP Finder
+      url: extensions-and-integrations/zookeeper-ip-finder-ext
 - title: Plugins
   url: plugins
 - title: Performance and Troubleshooting

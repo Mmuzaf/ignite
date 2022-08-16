@@ -63,6 +63,7 @@ import org.apache.ignite.internal.util.typedef.X;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.internal.util.worker.GridWorker;
 import org.apache.ignite.lang.IgniteBiTuple;
+import org.jetbrains.annotations.Nullable;
 
 import static java.sql.ResultSetMetaData.columnNoNulls;
 import static java.sql.ResultSetMetaData.columnNullable;
@@ -135,6 +136,7 @@ public class OdbcRequestHandler implements ClientListenerRequestHandler {
      * @param collocated Collocated flag.
      * @param lazy Lazy flag.
      * @param skipReducerOnUpdate Skip reducer on update flag.
+     * @param qryEngine Name of SQL query engine to use.
      * @param nestedTxMode Nested transaction mode.
      * @param ver Client protocol version.
      */
@@ -149,6 +151,7 @@ public class OdbcRequestHandler implements ClientListenerRequestHandler {
         boolean collocated,
         boolean lazy,
         boolean skipReducerOnUpdate,
+        @Nullable String qryEngine,
         NestedTxMode nestedTxMode,
         ClientListenerProtocolVersion ver,
         OdbcConnectionContext connCtx) {
@@ -171,7 +174,8 @@ public class OdbcRequestHandler implements ClientListenerRequestHandler {
             lazy,
             skipReducerOnUpdate,
             null,
-            null
+            null,
+            qryEngine
         );
 
         this.busyLock = busyLock;
@@ -509,7 +513,8 @@ public class OdbcRequestHandler implements ClientListenerRequestHandler {
                 cliCtx.waitTotalProcessedOrderedRequests(req.order());
 
             sender.send(processStreamingBatch(req));
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             U.error(null, "Error processing file batch", e);
 
             sender.send(new OdbcResponse(IgniteQueryErrorCode.UNKNOWN, "Server error: " + e));
@@ -551,8 +556,7 @@ public class OdbcRequestHandler implements ClientListenerRequestHandler {
 
         if (firstErr.isEmpty())
             return new OdbcResponse(new OdbcStreamingBatchResult(req.order()));
-        else
-        {
+        else {
             assert firstErr.getKey() != null;
 
             return new OdbcResponse(new OdbcStreamingBatchResult(firstErr.getKey(), firstErr.getValue(), req.order()));

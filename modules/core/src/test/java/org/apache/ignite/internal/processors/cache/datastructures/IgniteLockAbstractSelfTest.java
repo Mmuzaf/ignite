@@ -60,12 +60,10 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
-
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.apache.ignite.cache.CacheAtomicityMode.TRANSACTIONAL;
-import static org.apache.ignite.cache.CacheMode.LOCAL;
 import static org.apache.ignite.cache.CacheWriteSynchronizationMode.FULL_SYNC;
 
 /**
@@ -106,9 +104,6 @@ public abstract class IgniteLockAbstractSelfTest extends IgniteAtomicsAbstractTe
      */
     @Test
     public void testFailover() throws Exception {
-        if (atomicsCacheMode() == LOCAL)
-            return;
-
         checkFailover(true, false);
 
         checkFailover(false, false);
@@ -1579,7 +1574,8 @@ public abstract class IgniteLockAbstractSelfTest extends IgniteAtomicsAbstractTe
         lock1.close();
         try {
             lock2.lock();
-        } catch (IgniteException e) {
+        }
+        catch (IgniteException e) {
             String msg = String.format("Failed to find reentrant lock with given name: " + lockName);
             assertEquals(msg, e.getMessage());
             throw e;

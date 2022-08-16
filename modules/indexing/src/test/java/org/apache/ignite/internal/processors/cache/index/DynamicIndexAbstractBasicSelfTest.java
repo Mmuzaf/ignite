@@ -36,6 +36,7 @@ import org.apache.ignite.internal.IgniteEx;
 import org.apache.ignite.internal.processors.cache.query.IgniteQueryErrorCode;
 import org.apache.ignite.internal.processors.query.IgniteSQLException;
 import org.apache.ignite.internal.processors.query.schema.SchemaOperationException;
+import org.apache.ignite.internal.util.lang.RunnableX;
 import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.testframework.junits.WithSystemProperty;
 import org.junit.Test;
@@ -45,7 +46,6 @@ import static org.apache.ignite.cache.CacheAtomicityMode.ATOMIC;
 import static org.apache.ignite.cache.CacheAtomicityMode.TRANSACTIONAL;
 import static org.apache.ignite.cache.CacheMode.PARTITIONED;
 import static org.apache.ignite.cache.CacheMode.REPLICATED;
-import static org.apache.ignite.testframework.GridTestUtils.RunnableX;
 import static org.apache.ignite.testframework.GridTestUtils.assertThrows;
 
 /**
@@ -1187,35 +1187,6 @@ public abstract class DynamicIndexAbstractBasicSelfTest extends DynamicIndexAbst
         }
 
         fail(SchemaOperationException.class.getSimpleName() + " is not thrown.");
-    }
-
-    /**
-     * Test that operations fail on LOCAL cache.
-     *
-     * @throws Exception If failed.
-     */
-    @Test
-    public void testFailOnLocalCache() throws Exception {
-        for (Ignite node : Ignition.allGrids()) {
-            if (!node.configuration().isClientMode())
-                createSqlCache(node, localCacheConfiguration());
-        }
-
-        final QueryIndex idx = index(IDX_NAME_1, field(FIELD_NAME_1_ESCAPED));
-
-        assertIgniteSqlException(new RunnableX() {
-            @Override public void runx() throws Exception {
-                dynamicIndexCreate(CACHE_NAME, TBL_NAME, idx, true, 0);
-            }
-        }, IgniteQueryErrorCode.UNSUPPORTED_OPERATION);
-
-        assertNoIndex(CACHE_NAME, TBL_NAME, IDX_NAME_1);
-
-        assertIgniteSqlException(new RunnableX() {
-            @Override public void runx() throws Exception {
-                dynamicIndexDrop(CACHE_NAME, IDX_NAME_LOCAL, true);
-            }
-        }, IgniteQueryErrorCode.UNSUPPORTED_OPERATION);
     }
 
     /**

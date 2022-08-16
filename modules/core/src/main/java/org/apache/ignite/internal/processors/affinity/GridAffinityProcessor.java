@@ -70,8 +70,6 @@ import org.apache.ignite.lang.IgnitePredicate;
 import org.apache.ignite.lang.IgniteUuid;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-
-import static org.apache.ignite.cache.CacheMode.LOCAL;
 import static org.apache.ignite.events.EventType.EVT_NODE_FAILED;
 import static org.apache.ignite.events.EventType.EVT_NODE_LEFT;
 import static org.apache.ignite.internal.GridClosureCallMode.BROADCAST;
@@ -306,9 +304,8 @@ public class GridAffinityProcessor extends GridProcessorAdapter {
      */
     public <K> List<ClusterNode> mapKeyToPrimaryAndBackups(String cacheName,
         K key,
-        AffinityTopologyVersion topVer)
-        throws IgniteCheckedException
-    {
+        AffinityTopologyVersion topVer
+    ) throws IgniteCheckedException {
         assert cacheName != null;
 
         A.notNull(key, "key");
@@ -413,6 +410,9 @@ public class GridAffinityProcessor extends GridProcessorAdapter {
         throws IgniteCheckedException {
         assert cacheName != null;
 
+        if (topVer == null)
+            topVer = ctx.cache().context().exchange().readyAffinityVersion();
+
         IgniteInternalFuture<AffinityInfo> locFetchFut = localAffinityInfo(cacheName, topVer);
 
         if (locFetchFut != null)
@@ -432,10 +432,9 @@ public class GridAffinityProcessor extends GridProcessorAdapter {
      */
     private IgniteInternalFuture<AffinityInfo> localAffinityInfo(
         String cacheName,
-        @Nullable AffinityTopologyVersion topVer
+        AffinityTopologyVersion topVer
     ) throws IgniteCheckedException {
-        if (topVer == null)
-            topVer = ctx.cache().context().exchange().readyAffinityVersion();
+        assert topVer != null;
 
         AffinityAssignmentKey key = new AffinityAssignmentKey(cacheName, topVer);
 
@@ -496,10 +495,9 @@ public class GridAffinityProcessor extends GridProcessorAdapter {
      */
     private IgniteInternalFuture<AffinityInfo> remoteAffinityInfo(
         String cacheName,
-        @Nullable AffinityTopologyVersion topVer
+        AffinityTopologyVersion topVer
     ) {
-        if (topVer == null)
-            topVer = ctx.discovery().topologyVersionEx();
+        assert topVer != null;
 
         AffinityAssignmentKey key = new AffinityAssignmentKey(cacheName, topVer);
 
@@ -514,9 +512,6 @@ public class GridAffinityProcessor extends GridProcessorAdapter {
 
             return new GridFinishedFuture<>((AffinityInfo)null);
         }
-
-        if (desc.cacheConfiguration().getCacheMode() == LOCAL)
-            return new GridFinishedFuture<>(new IgniteCheckedException("Failed to map keys for LOCAL cache: " + cacheName));
 
         AffinityFuture fut0 = new AffinityFuture(cacheName, topVer, cacheNodes);
 

@@ -20,8 +20,10 @@ namespace Apache.Ignite.Core.Tests.Services
 {
     using System;
     using System.Collections;
+    using System.Collections.Generic;
     using System.Linq;
     using Apache.Ignite.Core.Binary;
+    using Apache.Ignite.Core.Cluster;
     using Apache.Ignite.Core.Resource;
     using Apache.Ignite.Core.Services;
     using NUnit.Framework;
@@ -42,10 +44,20 @@ namespace Apache.Ignite.Core.Tests.Services
 
         /** */
         private const string CheckThinTaskName = "org.apache.ignite.platform.PlatformServiceCallThinTask";
+        
+        /** */
+        private const string NodeTypeAttr = "TYPE";
+        
+        /** */
+        private const string DotnetSrvNodeType = "dotnet-srv";
 
         /** */
         private const string CheckCollectionsThinTaskName =
             "org.apache.ignite.platform.PlatformServiceCallCollectionsThinTask";
+        
+        /** */
+        private const string PlatformServiceCallPureJavaTask = 
+            "org.apache.ignite.platform.PlatformServiceCallPureJavaTask";
 
         /** */
         private readonly bool _useBinaryArray;
@@ -94,19 +106,27 @@ namespace Apache.Ignite.Core.Tests.Services
         /// in which real invocation of the service is made.
         /// <para/>
         /// <param name="local">If true call on local node.</param>
+        /// <param name="withNodeFilter">If true, deploy service with node filter.</param>
         /// <param name="taskName">Task to test.</param>
         /// </summary>
         [Test]
-        public void TestCallPlatformService([Values(true, false)] bool local,
-            [Values(CheckTaskName, CheckCollectionsTaskName, CheckThinTaskName, CheckCollectionsThinTaskName)]
+        public void TestCallPlatformService(
+            [Values(true, false)] bool local, 
+            [Values(true, false)] bool withNodeFilter,
+            [Values(CheckTaskName, CheckCollectionsTaskName, CheckThinTaskName, CheckCollectionsThinTaskName,
+                PlatformServiceCallPureJavaTask)]
             string taskName)
         {
             var cfg = new ServiceConfiguration
             {
                 Name = ServiceName,
                 TotalCount = 1,
-                Service = new TestPlatformService()
+                Service = new TestPlatformService(),
+                Interceptors = new List<IServiceCallInterceptor> { new PlatformTestServiceInterceptor("Intercepted") }
             };
+
+            if (withNodeFilter)
+                cfg.NodeFilter = new NodeTypeFilter(DotnetSrvNodeType);
 
             Grid1.GetServices().Deploy(cfg);
 
@@ -149,8 +169,34 @@ namespace Apache.Ignite.Core.Tests.Services
                 {
                     NameMapper = BinaryBasicNameMapper.SimpleNameInstance
                 },
-                LifecycleHandlers = _useBinaryArray ? new[] { new SetUseBinaryArray() } : null
+                LifecycleHandlers = _useBinaryArray ? new[] { new SetUseBinaryArray() } : null,
+                UserAttributes = new Dictionary<string, object> {{NodeTypeAttr, DotnetSrvNodeType}}
             };
+        }
+        
+        /// <summary>
+        /// Filter node by TYPE attribute.
+        /// </summary>
+        public class NodeTypeFilter : IClusterNodeFilter
+        {
+            /** */
+            private readonly string _type;
+
+            /// <summary>
+            /// Initializes a new instance of <see cref="NodeTypeFilter"/> class.
+            /// </summary>
+            /// <param name="type">Value of TYPE attribute to compare with.</param>
+            public NodeTypeFilter(string type)
+            {
+                _type= type;
+            }
+            
+            /** <inheritdoc /> */
+            public bool Invoke(IClusterNode node)
+            {
+                return node.TryGetAttribute<string>(NodeTypeAttr, out var attr)
+                       && string.Compare(attr, _type, StringComparison.OrdinalIgnoreCase) == 0;
+            }
         }
 
         /** */
@@ -181,8 +227,10 @@ namespace Apache.Ignite.Core.Tests.Services
             BinarizableTestValue AddOne(BinarizableTestValue val);
 
             /** */
-            // ReSharper disable once InconsistentNaming
-            string contextAttribute(string name);
+            string ContextAttribute(string name);
+            
+            /** */
+            int Intercepted(int val);
         }
 
         #pragma warning disable 649
@@ -250,7 +298,7 @@ namespace Apache.Ignite.Core.Tests.Services
 
                     var v = new TestValue()
                     {
-                        Id = ((TestValue)pair.Value).Id + 1,
+                        Id = (((TestValue)pair.Value)!).Id + 1,
                         Name = ((TestValue)pair.Value).Name
                     };
 
@@ -270,11 +318,18 @@ namespace Apache.Ignite.Core.Tests.Services
                 };
             }
 
-            public string contextAttribute(string name)
+            /** <inheritdoc /> */
+            public string ContextAttribute(string name)
             {
                 IServiceCallContext callCtx = _ctx.CurrentCallContext;
 
                 return callCtx == null ? null : callCtx.GetAttribute(name);
+            }
+
+            /** <inheritdoc /> */
+            public int Intercepted(int val)
+            {
+                return val;
             }
 
             /** <inheritdoc /> */

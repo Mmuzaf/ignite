@@ -106,13 +106,10 @@ import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
-
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.ignite.cache.CacheAtomicityMode.ATOMIC;
 import static org.apache.ignite.cache.CacheAtomicityMode.TRANSACTIONAL;
-import static org.apache.ignite.cache.CacheMode.LOCAL;
 import static org.apache.ignite.cache.CacheMode.PARTITIONED;
-import static org.apache.ignite.cache.CacheMode.REPLICATED;
 import static org.apache.ignite.cache.CachePeekMode.ALL;
 import static org.apache.ignite.cache.CachePeekMode.ONHEAP;
 import static org.apache.ignite.cache.CachePeekMode.PRIMARY;
@@ -1992,7 +1989,8 @@ public abstract class GridCacheAbstractFullApiSelfTest extends GridCacheAbstract
             try {
                 if (f != null)
                     f.get();
-            } catch (Throwable t) {
+            }
+            catch (Throwable t) {
                 assert false : "Unexpected exception " + t;
             }
         }
@@ -3222,7 +3220,7 @@ public abstract class GridCacheAbstractFullApiSelfTest extends GridCacheAbstract
      */
     @Test
     public void testDeletedEntriesFlag() throws Exception {
-        if (cacheMode() != LOCAL && cacheMode() != REPLICATED) {
+        if (cacheMode() == PARTITIONED) {
             final int cnt = 3;
 
             IgniteCache<String, Integer> cache = jcache();
@@ -3964,7 +3962,8 @@ public abstract class GridCacheAbstractFullApiSelfTest extends GridCacheAbstract
                 asyncCache.clear();
 
                 asyncCache.future().get();
-            } else
+            }
+            else
                 jcache().clearAsync().get();
         }
         else
@@ -4495,15 +4494,6 @@ public abstract class GridCacheAbstractFullApiSelfTest extends GridCacheAbstract
                 }
             }
         }, Math.min(ttl * 10, getTestTimeout())));
-
-        IgniteCache fullCache = fullCache();
-
-        if (!isMultiJvmObject(fullCache)) {
-            GridCacheAdapter internalCache = internalCache(fullCache);
-
-            if (internalCache.isLocal())
-                return;
-        }
 
         assert c.get(key) == null;
 
@@ -5392,8 +5382,8 @@ public abstract class GridCacheAbstractFullApiSelfTest extends GridCacheAbstract
                     asyncCache.clearAll(new HashSet<>(keysToRmv));
 
                 asyncCache.future().get();
-            } else {
-
+            }
+            else {
                 if (keysToRmv.size() == 1)
                     jcache().clearAsync(F.first(keysToRmv)).get();
                 else

@@ -17,8 +17,6 @@
 Module contains snapshot test.
 """
 
-from ducktape.mark.resource import cluster
-
 from ignitetest.services.ignite import IgniteService
 from ignitetest.services.ignite_app import IgniteApplicationService
 from ignitetest.services.utils.control_utility import ControlUtility
@@ -28,6 +26,7 @@ from ignitetest.services.utils.ignite_configuration.discovery import from_ignite
 from ignitetest.utils import ignite_versions
 from ignitetest.utils.ignite_test import IgniteTest
 from ignitetest.utils.version import IgniteVersion, LATEST, DEV_BRANCH
+from ignitetest.utils import cluster
 
 
 class SnapshotTest(IgniteTest):
@@ -48,11 +47,11 @@ class SnapshotTest(IgniteTest):
 
         ignite_config = IgniteConfiguration(
             version=version,
-            data_storage=DataStorageConfiguration(default=DataRegionConfiguration(persistent=True)),
-            metric_exporter='org.apache.ignite.spi.metric.jmx.JmxMetricExporterSpi'
+            data_storage=DataStorageConfiguration(default=DataRegionConfiguration(persistence_enabled=True)),
+            metric_exporters={'org.apache.ignite.spi.metric.jmx.JmxMetricExporterSpi'}
         )
 
-        nodes = IgniteService(self.test_context, ignite_config, num_nodes=len(self.test_context.cluster) - 1)
+        nodes = IgniteService(self.test_context, ignite_config, num_nodes=self.available_cluster_size - 1)
         nodes.start()
 
         control_utility = ControlUtility(nodes)

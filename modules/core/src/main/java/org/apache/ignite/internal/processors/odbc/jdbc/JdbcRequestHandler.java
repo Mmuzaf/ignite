@@ -55,6 +55,7 @@ import org.apache.ignite.internal.processors.cache.QueryCursorImpl;
 import org.apache.ignite.internal.processors.cache.binary.CacheObjectBinaryProcessorImpl;
 import org.apache.ignite.internal.processors.cache.mvcc.MvccUtils;
 import org.apache.ignite.internal.processors.cache.query.IgniteQueryErrorCode;
+import org.apache.ignite.internal.processors.cache.query.QueryCursorEx;
 import org.apache.ignite.internal.processors.cache.query.SqlFieldsQueryEx;
 import org.apache.ignite.internal.processors.odbc.ClientListenerProtocolVersion;
 import org.apache.ignite.internal.processors.odbc.ClientListenerRequest;
@@ -62,6 +63,7 @@ import org.apache.ignite.internal.processors.odbc.ClientListenerRequestHandler;
 import org.apache.ignite.internal.processors.odbc.ClientListenerResponse;
 import org.apache.ignite.internal.processors.odbc.ClientListenerResponseSender;
 import org.apache.ignite.internal.processors.odbc.SqlListenerUtils;
+import org.apache.ignite.internal.processors.odbc.SqlStateCode;
 import org.apache.ignite.internal.processors.query.GridQueryCancel;
 import org.apache.ignite.internal.processors.query.IgniteSQLException;
 import org.apache.ignite.internal.processors.query.NestedTxMode;
@@ -175,6 +177,7 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
      * @param autoCloseCursors Flag to automatically close server cursors.
      * @param lazy Lazy query execution flag.
      * @param skipReducerOnUpdate Skip reducer on update flag.
+     * @param qryEngine Name of SQL query engine to use.
      * @param dataPageScanEnabled Enable scan data page mode.
      * @param updateBatchSize Size of internal batch for DML queries.
      * @param protocolVer Protocol version.
@@ -191,6 +194,7 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
         boolean autoCloseCursors,
         boolean lazy,
         boolean skipReducerOnUpdate,
+        @Nullable String qryEngine,
         NestedTxMode nestedTxMode,
         @Nullable Boolean dataPageScanEnabled,
         @Nullable Integer updateBatchSize,
@@ -218,7 +222,8 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
             lazy,
             skipReducerOnUpdate,
             dataPageScanEnabled,
-            updateBatchSize
+            updateBatchSize,
+            qryEngine
         );
 
         this.busyLock = busyLock;
@@ -408,7 +413,7 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
             }
         }
 
-       return null;
+        return null;
     }
 
     /**
@@ -428,7 +433,8 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
             }
 
             sender.send(resp);
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             U.error(null, "Error processing file batch", e);
 
             sender.send(new JdbcResponse(IgniteQueryErrorCode.UNKNOWN, "Server error: " + e));
@@ -556,7 +562,6 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
      * @param req Execute query request.
      * @return Response.
      */
-    @SuppressWarnings("unchecked")
     private JdbcResponse executeQuery(JdbcQueryExecuteRequest req) {
         GridQueryCancel cancel = null;
 
@@ -633,8 +638,7 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
 
             qry.setSchema(schemaName);
 
-            List<FieldsQueryCursor<List<?>>> results = connCtx.kernalContext().query().querySqlFields(null, qry,
-                cliCtx, true, protocolVer.compareTo(VER_2_3_0) < 0, cancel);
+            List<FieldsQueryCursor<List<?>>> results = querySqlFields(qry, cancel);
 
             FieldsQueryCursor<List<?>> fieldsCur = results.get(0);
 
@@ -654,7 +658,7 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
 
             if (results.size() == 1) {
                 JdbcQueryCursor cur = new JdbcQueryCursor(req.pageSize(), req.maxRows(),
-                    (QueryCursorImpl)fieldsCur, req.requestId());
+                    (QueryCursorEx<List<?>>)fieldsCur, req.requestId());
 
                 jdbcCursors.put(cur.cursorId(), cur);
 
@@ -662,7 +666,10 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
 
                 JdbcQueryExecuteResult res;
 
-                PartitionResult partRes = ((QueryCursorImpl<List<?>>)fieldsCur).partitionResult();
+                PartitionResult partRes = null;
+
+                if (fieldsCur instanceof QueryCursorImpl)
+                    partRes = ((QueryCursorImpl<List<?>>)fieldsCur).partitionResult();
 
                 if (cur.isQuery())
                     res = new JdbcQueryExecuteResult(cur.cursorId(), cur.fetchRows(), !cur.hasNext(),
@@ -699,7 +706,7 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
                 boolean last = true;
 
                 for (FieldsQueryCursor<List<?>> c : results) {
-                    QueryCursorImpl qryCur = (QueryCursorImpl)c;
+                    QueryCursorEx<List<?>> qryCur = (QueryCursorEx<List<?>>)c;
 
                     JdbcResultInfo jdbcRes;
 
@@ -732,16 +739,39 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
 
             unregisterReq = true;
 
-            U.error(log, "Failed to execute SQL query [reqId=" + req.requestId() + ", req=" + req + ']', e);
+            if (X.cause(e, QueryCancelledException.class) != null) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Failed to execute SQL query " +
+                        "[reqId=" + req.requestId() +
+                        ", req=" + req +
+                        "]. Error:" + X.getFullStackTrace(e));
+                }
 
-            if (X.cause(e, QueryCancelledException.class) != null)
                 return exceptionToResult(new QueryCancelledException());
-            else
+            }
+            else if (X.cause(e, IgniteSQLException.class) != null) {
+                IgniteSQLException e0 = X.cause(e, IgniteSQLException.class);
+
+                if (isNeedToNodeLog(e0))
+                    U.warn(log, "Failed to execute SQL query [reqId=" + req.requestId() + ", req=" + req + ']', e);
+
+                return exceptionToResult(e0);
+            }
+            else {
+                U.warn(log, "Failed to execute SQL query [reqId=" + req.requestId() + ", req=" + req + ']', e);
+
                 return exceptionToResult(e);
+            }
         }
         finally {
             cleanupQueryCancellationMeta(unregisterReq, req.requestId());
         }
+    }
+
+    /** */
+    private List<FieldsQueryCursor<List<?>>> querySqlFields(SqlFieldsQueryEx qry, GridQueryCancel cancel) {
+        return connCtx.kernalContext().query().querySqlFields(null, qry,
+            cliCtx, true, protocolVer.compareTo(VER_2_3_0) < 0, cancel);
     }
 
     /**
@@ -1033,7 +1063,7 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
                 if (cur instanceof BulkLoadContextCursor)
                     throw new IgniteSQLException("COPY command cannot be executed in batch mode.");
 
-                assert !((QueryCursorImpl)cur).isQuery();
+                assert !((QueryCursorEx)cur).isQuery();
 
                 Iterator<List<?>> it = cur.iterator();
 
@@ -1592,5 +1622,15 @@ public class JdbcRequestHandler implements ClientListenerRequestHandler {
     /** {@inheritDoc} */
     @Override public ClientListenerProtocolVersion protocolVersion() {
         return protocolVer;
+    }
+
+    /**
+     * Checks SQL error to print into node log.
+     *
+     * @param e Exception to handle.
+     * @return {@code true} is the exception should be printed into node log. Otherwise, returns {@code false}.
+     */
+    private static boolean isNeedToNodeLog(IgniteSQLException e) {
+        return SqlStateCode.INTERNAL_ERROR.equals(e.sqlState());
     }
 }

@@ -76,7 +76,6 @@ import org.apache.ignite.transactions.TransactionIsolation;
 import org.jetbrains.annotations.Nullable;
 import org.junit.Ignore;
 import org.junit.Test;
-
 import static org.apache.ignite.cache.CacheAtomicityMode.TRANSACTIONAL;
 import static org.apache.ignite.cache.CacheWriteSynchronizationMode.FULL_SYNC;
 import static org.apache.ignite.transactions.TransactionConcurrency.PESSIMISTIC;
@@ -113,9 +112,11 @@ public abstract class GridCacheBinaryObjectsAbstractSelfTest extends GridCommonA
 
         List<BinaryTypeConfiguration> binTypes = new ArrayList<>();
 
-        binTypes.add(new BinaryTypeConfiguration() {{
-            setTypeName("ArrayHashedKey");
-        }});
+        BinaryTypeConfiguration type = new BinaryTypeConfiguration();
+
+        type.setTypeName("ArrayHashedKey");
+
+        binTypes.add(type);
 
         BinaryConfiguration binCfg = new BinaryConfiguration();
         binCfg.setTypeConfigurations(binTypes);
@@ -1208,12 +1209,10 @@ public abstract class GridCacheBinaryObjectsAbstractSelfTest extends GridCommonA
 
         checkTransform(primaryKey(c));
 
-        if (cacheMode() != CacheMode.LOCAL) {
-            checkTransform(backupKey(c));
+        checkTransform(backupKey(c));
 
-            if (nearConfiguration() != null)
-                checkTransform(nearKey(c));
-        }
+        if (nearConfiguration() != null)
+            checkTransform(nearKey(c));
     }
 
     /**

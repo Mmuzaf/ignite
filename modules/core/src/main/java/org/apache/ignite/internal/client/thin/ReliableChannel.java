@@ -45,6 +45,7 @@ import org.apache.ignite.client.ClientAuthorizationException;
 import org.apache.ignite.client.ClientConnectionException;
 import org.apache.ignite.client.ClientException;
 import org.apache.ignite.client.ClientOperationType;
+import org.apache.ignite.client.ClientPartitionAwarenessMapperFactory;
 import org.apache.ignite.client.ClientRetryPolicy;
 import org.apache.ignite.client.ClientRetryPolicyContext;
 import org.apache.ignite.client.IgniteClientFuture;
@@ -130,7 +131,7 @@ final class ReliableChannel implements AutoCloseable {
 
         partitionAwarenessEnabled = clientCfg.isPartitionAwarenessEnabled();
 
-        affinityCtx = new ClientCacheAffinityContext(binary);
+        affinityCtx = new ClientCacheAffinityContext(binary, clientCfg.getPartitionAwarenessMapperFactory());
 
         connMgr = new GridNioClientConnectionMultiplexer(clientCfg);
         connMgr.start();
@@ -198,7 +199,8 @@ final class ReliableChannel implements AutoCloseable {
 
         try {
             ch = applyOnDefaultChannel(channel -> channel, null, attemptsLimit, v -> attemptsCnt[0] = v);
-        } catch (Throwable ex) {
+        }
+        catch (Throwable ex) {
             if (failure != null) {
                 failure.addSuppressed(ex);
 
@@ -390,7 +392,7 @@ final class ReliableChannel implements AutoCloseable {
 
                             fut.completeExceptionally(err);
                             return null;
-                }));
+                        }));
 
                 if (result != null)
                     return new IgniteClientFutureImpl<>(fut);
@@ -399,6 +401,25 @@ final class ReliableChannel implements AutoCloseable {
         }
 
         return serviceAsync(op, payloadWriter, payloadReader);
+    }
+
+    /**
+     * @param cacheName Cache name.
+     */
+    public void registerCacheIfCustomAffinity(String cacheName) {
+        ClientPartitionAwarenessMapperFactory factory = clientCfg.getPartitionAwarenessMapperFactory();
+
+        if (factory == null)
+            return;
+
+        affinityCtx.registerCache(cacheName);
+    }
+
+    /**
+     * @param cacheName Cache name.
+     */
+    public void unregisterCacheIfCustomAffinity(String cacheName) {
+        affinityCtx.unregisterCache(cacheName);
     }
 
     /**
@@ -499,7 +520,8 @@ final class ReliableChannel implements AutoCloseable {
                 else
                     curChIdx = idx;
             }
-        } finally {
+        }
+        finally {
             curChannelsGuard.writeLock().unlock();
         }
     }
@@ -527,8 +549,19 @@ final class ReliableChannel implements AutoCloseable {
         rollCurrentChannel(hld);
 
         // For partiton awareness it's already initializing asynchronously in #onTopologyChanged.
-        if (scheduledChannelsReinit.get() && !partitionAwarenessEnabled)
+        if (addressFinderAddressesChanged() || (scheduledChannelsReinit.get() && !partitionAwarenessEnabled))
             channelsInit();
+    }
+
+    /**
+     * Checks whether addressFinder returns a different set of addresses.
+     */
+    private boolean addressFinderAddressesChanged() {
+        if (clientCfg.getAddressesFinder() == null)
+            return false;
+
+        String[] hostAddrs = clientCfg.getAddressesFinder().getAddresses();
+        return !Arrays.equals(hostAddrs, prevHostAddrs);
     }
 
     /**
@@ -607,7 +640,8 @@ final class ReliableChannel implements AutoCloseable {
                 newAddrs = parsedAddresses(hostAddrs);
                 prevHostAddrs = hostAddrs;
             }
-        } else if (holders == null)
+        }
+        else if (holders == null)
             newAddrs = parsedAddresses(clientCfg.getAddresses());
 
         if (newAddrs == null) {
@@ -719,7 +753,8 @@ final class ReliableChannel implements AutoCloseable {
 
             if (channel != null)
                 return function.apply(channel);
-        } catch (ClientConnectionException e) {
+        }
+        catch (ClientConnectionException e) {
             onChannelFailure(hld, channel);
         }
 
@@ -727,7 +762,7 @@ final class ReliableChannel implements AutoCloseable {
     }
 
     /** */
-    private <T> T applyOnDefaultChannel(Function<ClientChannel, T> function, ClientOperation op) {
+    <T> T applyOnDefaultChannel(Function<ClientChannel, T> function, ClientOperation op) {
         return applyOnDefaultChannel(function, op, getRetryLimit(), DO_NOTHING);
     }
 
@@ -752,7 +787,8 @@ final class ReliableChannel implements AutoCloseable {
 
                 try {
                     hld = channels.get(curChIdx);
-                } finally {
+                }
+                finally {
                     curChannelsGuard.readLock().unlock();
                 }
 
@@ -798,7 +834,8 @@ final class ReliableChannel implements AutoCloseable {
                 if (channel != null)
                     return function.apply(channel);
 
-            } catch (ClientConnectionException e) {
+            }
+            catch (ClientConnectionException e) {
                 onChannelFailure(hld, channel);
 
                 retryLimit -= 1;
@@ -838,6 +875,13 @@ final class ReliableChannel implements AutoCloseable {
         ClientRetryPolicyContext ctx = new ClientRetryPolicyContextImpl(clientCfg, opType, iteration, exception);
 
         return plc.shouldRetry(ctx);
+    }
+
+    /**
+     * @return Affinity context.
+     */
+    ClientCacheAffinityContext affinityContext() {
+        return affinityCtx;
     }
 
     /**

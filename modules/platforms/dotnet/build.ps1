@@ -172,7 +172,7 @@ $libsDir = "$PSScriptRoot\bin\libs"
 Make-Dir($libsDir)
 
 Get-ChildItem $jarDirs.Split(',') *.jar -recurse `
-   -include "ignite-core*","ignite-indexing*","ignite-shmem*","ignite-spring*","lucene*","h2*","cache-api*","commons-*","spring*" `
+   -include "ignite-core*","ignite-indexing*","ignite-spring*","lucene*","h2*","cache-api*","commons-*","spring*" `
    -exclude "*-sources*","*-javadoc*","*-tests*" `
    | ? { $_.FullName -inotmatch '[\\/]optional[\\/]' } `
    | % { Copy-Item -Force $_ $libsDir }
@@ -184,6 +184,9 @@ cd $PSScriptRoot
 # 2) Build .NET
 if (!$skipDotNet) {
     Build-Solution ".\Apache.Ignite.sln" "bin\net461"
+    
+    # Overwrite dlls to ensure that net461 versions are used instead of netstandard2. 
+    Copy-Item -Force -Recurse ".\Apache.Ignite\bin\$configuration\net461\*" "bin\net461"
 }
 
 if(!$skipDotNetCore) {

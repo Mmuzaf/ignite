@@ -23,6 +23,7 @@ import org.apache.ignite.internal.processors.query.stat.BusyExecutorTest;
 import org.apache.ignite.internal.processors.query.stat.ColumnStatisticsCollectorAggregationTest;
 import org.apache.ignite.internal.processors.query.stat.ColumnStatisticsCollectorTest;
 import org.apache.ignite.internal.processors.query.stat.HasherSelfTest;
+import org.apache.ignite.internal.processors.query.stat.IgniteStatisticsRepositoryStaticTest;
 import org.apache.ignite.internal.processors.query.stat.IgniteStatisticsRepositoryTest;
 import org.apache.ignite.internal.processors.query.stat.ManagerStatisticsTypesTest;
 import org.apache.ignite.internal.processors.query.stat.PSUBasicValueDistributionTableStatisticsUsageTest;
@@ -35,11 +36,14 @@ import org.apache.ignite.internal.processors.query.stat.SqlStatisticsCommandTest
 import org.apache.ignite.internal.processors.query.stat.StatisticsClearTest;
 import org.apache.ignite.internal.processors.query.stat.StatisticsConfigurationTest;
 import org.apache.ignite.internal.processors.query.stat.StatisticsGatheringTest;
+import org.apache.ignite.internal.processors.query.stat.StatisticsGlobalViewInMemoryTest;
+import org.apache.ignite.internal.processors.query.stat.StatisticsGlobalViewPersistenceTest;
 import org.apache.ignite.internal.processors.query.stat.StatisticsObsolescenceTest;
 import org.apache.ignite.internal.processors.query.stat.StatisticsStorageInMemoryTest;
 import org.apache.ignite.internal.processors.query.stat.StatisticsStoragePersistenceTest;
 import org.apache.ignite.internal.processors.query.stat.StatisticsStorageRestartTest;
 import org.apache.ignite.internal.processors.query.stat.StatisticsStorageUnitTest;
+import org.apache.ignite.internal.processors.query.stat.StatisticsUtilsTest;
 import org.apache.ignite.internal.processors.query.stat.StatisticsViewsInMemoryTest;
 import org.apache.ignite.internal.processors.query.stat.StatisticsViewsPersistenceTest;
 import org.apache.ignite.internal.processors.query.stat.hll.FullHLLTest;
@@ -47,6 +51,7 @@ import org.apache.ignite.internal.sql.SqlParserAnalyzeSelfTest;
 import org.apache.ignite.internal.sql.SqlParserDropStatisticsSelfTest;
 import org.apache.ignite.internal.sql.SqlParserRefreshStatisticsSelfTest;
 import org.apache.ignite.internal.systemview.JmxExporterSpiTest;
+import org.apache.ignite.internal.systemview.SystemViewSecurityTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -64,6 +69,7 @@ import org.junit.runners.Suite;
     StatisticsStorageRestartTest.class,
     StatisticsGatheringTest.class,
     StatisticsClearTest.class,
+    IgniteStatisticsRepositoryStaticTest.class,
 
     // Table statistics usage.
     RowCountTableStatisticsUsageTest.class,
@@ -81,6 +87,7 @@ import org.junit.runners.Suite;
     StatisticsStorageInMemoryTest.class,
     StatisticsStoragePersistenceTest.class,
     StatisticsStorageUnitTest.class,
+    StatisticsUtilsTest.class,
 
     // Statistics SQL commands
     SqlParserAnalyzeSelfTest.class,
@@ -95,7 +102,10 @@ import org.junit.runners.Suite;
     // Views
     StatisticsViewsPersistenceTest.class,
     StatisticsViewsInMemoryTest.class,
-    JmxExporterSpiTest.class
+    StatisticsGlobalViewPersistenceTest.class,
+    StatisticsGlobalViewInMemoryTest.class,
+    JmxExporterSpiTest.class,
+    SystemViewSecurityTest.class
 })
 public class IgniteStatisticsTestSuite {
 }

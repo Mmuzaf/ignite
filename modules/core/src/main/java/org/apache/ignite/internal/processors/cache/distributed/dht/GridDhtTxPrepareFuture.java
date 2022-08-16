@@ -498,6 +498,7 @@ public final class GridDhtTxPrepareFuture extends GridCacheCompoundFuture<Ignite
                             }
 
                             txEntry.entryProcessorCalculatedValue(new T2<>(op, op == NOOP ? null : val));
+                            txEntry.noop(op == NOOP);
 
                             if (retVal) {
                                 if (err != null || procRes != null)
@@ -528,8 +529,7 @@ public final class GridDhtTxPrepareFuture extends GridCacheCompoundFuture<Ignite
                 }
 
                 // Send old value in case if rebalancing is not finished.
-                final boolean sndOldVal = !cacheCtx.isLocal() &&
-                    !cacheCtx.topology().rebalanceFinished(tx.topologyVersion());
+                final boolean sndOldVal = !cacheCtx.topology().rebalanceFinished(tx.topologyVersion());
 
                 if (sndOldVal) {
                     if (oldVal == null && !readOld) {
@@ -544,9 +544,6 @@ public final class GridDhtTxPrepareFuture extends GridCacheCompoundFuture<Ignite
                             /*expiryPlc*/null,
                             /*keepBinary*/true);
                     }
-
-                    if (oldVal != null)
-                        oldVal.prepareMarshal(cacheCtx.cacheObjectContext());
 
                     txEntry.oldValue(oldVal);
                 }
@@ -667,9 +664,6 @@ public final class GridDhtTxPrepareFuture extends GridCacheCompoundFuture<Ignite
     private void readyLocks(Iterable<IgniteTxEntry> checkEntries) {
         for (IgniteTxEntry txEntry : checkEntries) {
             GridCacheContext cacheCtx = txEntry.context();
-
-            if (cacheCtx.isLocal())
-                continue;
 
             GridDistributedCacheEntry entry = (GridDistributedCacheEntry)txEntry.cached();
 

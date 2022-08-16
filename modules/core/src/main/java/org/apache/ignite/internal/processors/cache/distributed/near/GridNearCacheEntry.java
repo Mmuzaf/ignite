@@ -200,9 +200,8 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
         GridCacheVersion ver,
         GridCacheVersion dhtVer,
         UUID primaryNodeId,
-        AffinityTopologyVersion topVer)
-        throws GridCacheEntryRemovedException
-    {
+        AffinityTopologyVersion topVer
+    ) throws GridCacheEntryRemovedException {
         assert dhtVer != null;
 
         cctx.versions().onReceived(primaryNodeId, dhtVer);
@@ -245,8 +244,8 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
         long expireTime,
         long ttl,
         UUID primaryNodeId,
-        AffinityTopologyVersion topVer)
-    {
+        AffinityTopologyVersion topVer
+    ) {
         assert dhtVer != null;
 
         cctx.versions().onReceived(primaryNodeId, dhtVer);
@@ -398,8 +397,8 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
         try {
             checkObsolete();
 
-                if (cctx.statisticsEnabled())
-                    cctx.cache().metrics0().onRead(false);
+            if (cctx.statisticsEnabled())
+                cctx.cache().metrics0().onRead(false);
 
             boolean ret = false;
 
@@ -473,7 +472,13 @@ public class GridNearCacheEntry extends GridDistributedCacheEntry {
     }
 
     /** {@inheritDoc} */
-    @Override protected WALPointer logTxUpdate(IgniteInternalTx tx, CacheObject val, long expireTime, long updCntr) {
+    @Override protected WALPointer logTxUpdate(
+        IgniteInternalTx tx,
+        CacheObject val,
+        GridCacheVersion writeVer,
+        long expireTime,
+        long updCntr
+    ) {
         return null;
     }
 

@@ -25,7 +25,6 @@
 
     <xs:simpleType name="cacheMode" final="restriction">
         <xs:restriction base="xs:string">
-            <xs:enumeration value="Local" />
             <xs:enumeration value="Replicated" />
             <xs:enumeration value="Partitioned" />
         </xs:restriction>
@@ -1577,6 +1576,11 @@
                                     <xs:attribute name="maxActiveComputeTasksPerConnection" type="xs:int">
                                         <xs:annotation>
                                             <xs:documentation>Active compute tasks per connection limit. Or 0 if compute grid functionality is disabled for thin clients.</xs:documentation>
+                                        </xs:annotation>
+                                    </xs:attribute>
+                                    <xs:attribute name="sendServerExceptionStackTraceToClient" type="xs:boolean">
+                                        <xs:annotation>
+                                            <xs:documentation>Whether to send full server exception stack trace to clients.</xs:documentation>
                                         </xs:annotation>
                                     </xs:attribute>
                                 </xs:complexType>

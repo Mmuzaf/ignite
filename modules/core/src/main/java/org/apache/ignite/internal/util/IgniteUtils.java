@@ -120,6 +120,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Properties;
 import java.util.Random;
 import java.util.ServiceLoader;
 import java.util.Set;
@@ -139,6 +140,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Condition;
@@ -235,7 +237,6 @@ import org.apache.ignite.internal.util.future.GridFutureAdapter;
 import org.apache.ignite.internal.util.future.IgniteFinishedFutureImpl;
 import org.apache.ignite.internal.util.future.IgniteFutureImpl;
 import org.apache.ignite.internal.util.io.GridFilenameUtils;
-import org.apache.ignite.internal.util.ipc.shmem.IpcSharedMemoryNativeLoader;
 import org.apache.ignite.internal.util.lang.GridClosureException;
 import org.apache.ignite.internal.util.lang.GridPeerDeployAware;
 import org.apache.ignite.internal.util.lang.GridTuple;
@@ -248,6 +249,7 @@ import org.apache.ignite.internal.util.typedef.P1;
 import org.apache.ignite.internal.util.typedef.X;
 import org.apache.ignite.internal.util.typedef.internal.A;
 import org.apache.ignite.internal.util.typedef.internal.LT;
+import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.SB;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.internal.util.worker.GridWorker;
@@ -290,13 +292,17 @@ import sun.misc.Unsafe;
 import static java.util.Objects.isNull;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_DISABLE_HOSTNAME_VERIFIER;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_HOME;
+import static org.apache.ignite.IgniteSystemProperties.IGNITE_IGNORE_LOCAL_HOST_NAME;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_LOCAL_HOST;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_MBEAN_APPEND_CLASS_LOADER_ID;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_MBEAN_APPEND_JVM_ID;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_NO_DISCO_ORDER;
+import static org.apache.ignite.IgniteSystemProperties.IGNITE_REST_START_ON_CLIENT;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_SSH_HOST;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_SSH_USER_NAME;
+import static org.apache.ignite.IgniteSystemProperties.IGNITE_SUCCESS_FILE;
 import static org.apache.ignite.IgniteSystemProperties.getBoolean;
+import static org.apache.ignite.IgniteSystemProperties.getString;
 import static org.apache.ignite.events.EventType.EVTS_ALL;
 import static org.apache.ignite.events.EventType.EVTS_ALL_MINUS_METRIC_UPDATE;
 import static org.apache.ignite.events.EventType.EVT_NODE_METRICS_UPDATED;
@@ -316,6 +322,9 @@ import static org.apache.ignite.internal.util.GridUnsafe.staticFieldOffset;
  */
 @SuppressWarnings({"UnusedReturnValue"})
 public abstract class IgniteUtils {
+    /** Logger. */
+    private static final Logger log = Logger.getLogger(IgniteUtils.class.getName());
+
     /** */
     public static final long KB = 1024L;
 
@@ -361,10 +370,13 @@ public abstract class IgniteUtils {
     /** Empty integers array. */
     public static final int[] EMPTY_INTS = new int[0];
 
-    /** Empty  longs. */
+    /** Empty longs array. */
     public static final long[] EMPTY_LONGS = new long[0];
 
-    /** Empty  longs. */
+    /** Empty strings array. */
+    public static final String[] EMPTY_STRS = new String[0];
+
+    /** Empty fields array. */
     public static final Field[] EMPTY_FIELDS = new Field[0];
 
     /** System line separator. */
@@ -587,9 +599,6 @@ public abstract class IgniteUtils {
     private static final ConcurrentMap<ClassLoader, ConcurrentMap<String, Class>> classCache =
         new ConcurrentHashMap<>();
 
-    /** */
-    private static volatile Boolean hasShmem;
-
     /** Object.hashCode() */
     private static Method hashCodeMtd;
 
@@ -647,6 +656,19 @@ public abstract class IgniteUtils {
 
     /** Byte count prefixes. */
     private static final String BYTE_CNT_PREFIXES = " KMGTPE";
+
+    /**
+     * Success file name property. This file is used with auto-restarting functionality when Ignite
+     * is started by supplied ignite.{bat|sh} scripts.
+     */
+    public static final String IGNITE_SUCCESS_FILE_PROPERTY = System.getProperty(IGNITE_SUCCESS_FILE);
+
+    /**
+     * JMX remote system property. Setting this property registered the Java VM platform's MBeans and published
+     * the Remote Method Invocation (RMI) connector via a private interface to allow JMX client applications
+     * to monitor a local Java platform, that is, a Java VM running on the same machine as the JMX client.
+     */
+    public static final String IGNITE_JMX_REMOTE_PROPERTY = System.getProperty("com.sun.management.jmxremote");
 
     /*
      * Initializes enterprise check.
@@ -1048,16 +1070,25 @@ public abstract class IgniteUtils {
      * @return Plugins.
      */
     public static List<PluginProvider> allPluginProviders() {
-        return AccessController.doPrivileged(new PrivilegedAction<List<PluginProvider>>() {
-            @Override public List<PluginProvider> run() {
-                List<PluginProvider> providers = new ArrayList<>();
+        List<PluginProvider> providers = new ArrayList<>();
 
-                ServiceLoader<PluginProvider> ldr = ServiceLoader.load(PluginProvider.class);
+        Iterable<PluginProvider> it = loadService(PluginProvider.class);
 
-                for (PluginProvider provider : ldr)
-                    providers.add(provider);
+        for (PluginProvider provider : it)
+            providers.add(provider);
 
-                return providers;
+        return providers;
+    }
+
+    /**
+     * @param svcCls Service class to load.
+     * @param <S> Type of loaded interfaces.
+     * @return Lazy iterable structure over loaded class implementations.
+     */
+    public static <S> Iterable<S> loadService(Class<S> svcCls) {
+        return AccessController.doPrivileged(new PrivilegedAction<Iterable<S>>() {
+            @Override public Iterable<S> run() {
+                return ServiceLoader.load(svcCls);
             }
         });
     }
@@ -2253,11 +2284,19 @@ public abstract class IgniteUtils {
      */
     private static void addresses(InetAddress addr, Collection<String> addrs, Collection<String> hostNames,
         boolean allHostNames) {
-        String hostName = addr.getHostName();
-
         String ipAddr = addr.getHostAddress();
 
         addrs.add(ipAddr);
+
+        boolean ignoreLocalHostName = getBoolean(IGNITE_IGNORE_LOCAL_HOST_NAME, true);
+
+        String userDefinedLocalHost = getString(IGNITE_LOCAL_HOST);
+
+        // If IGNITE_LOCAL_HOST is defined and IGNITE_IGNORE_LOCAL_HOST_NAME is not false, then ignore local address's hostname
+        if (!F.isEmpty(userDefinedLocalHost) && ignoreLocalHostName)
+            return;
+
+        String hostName = addr.getHostName();
 
         if (allHostNames)
             hostNames.add(hostName);
@@ -3735,7 +3774,8 @@ public abstract class IgniteUtils {
                             return false;
                     }
                 }
-            } catch (IOException e) {
+            }
+            catch (IOException e) {
                 return false;
             }
         }
@@ -3754,7 +3794,8 @@ public abstract class IgniteUtils {
             Files.delete(path);
 
             return true;
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             return false;
         }
     }
@@ -4089,12 +4130,23 @@ public abstract class IgniteUtils {
      * @return Hex string.
      */
     public static String byteArray2HexString(byte[] arr) {
+        return byteArray2HexString(arr, true);
+    }
+
+    /**
+     * Converts byte array to hex string.
+     *
+     * @param arr Array of bytes.
+     * @param toUpper If {@code true} returns upper cased result.
+     * @return Hex string.
+     */
+    public static String byteArray2HexString(byte[] arr, boolean toUpper) {
         StringBuilder sb = new StringBuilder(arr.length << 1);
 
         for (byte b : arr)
             addByteAsHex(sb, b);
 
-        return sb.toString().toUpperCase();
+        return toUpper ? sb.toString().toUpperCase() : sb.toString();
     }
 
     /**
@@ -4282,7 +4334,7 @@ public abstract class IgniteUtils {
                 rsrc.close();
             }
             catch (Exception suppressed) {
-               e.addSuppressed(suppressed);
+                e.addSuppressed(suppressed);
             }
     }
 
@@ -4715,7 +4767,7 @@ public abstract class IgniteUtils {
                 Class<?> log4jCls;
 
                 try {
-                    log4jCls = Class.forName("org.apache.ignite.logger.log4j.Log4JLogger");
+                    log4jCls = Class.forName("org.apache.ignite.logger.log4j2.Log4J2Logger");
                 }
                 catch (ClassNotFoundException | NoClassDefFoundError ignored) {
                     log4jCls = null;
@@ -4776,7 +4828,7 @@ public abstract class IgniteUtils {
                 ((LoggerNodeIdAware)cfgLog).setNodeId(nodeId);
 
             if (log4jInitErr != null)
-                U.warn(cfgLog, "Failed to initialize Log4JLogger (falling back to standard java logging): "
+                U.warn(cfgLog, "Failed to initialize Log4J2Logger (falling back to standard java logging): "
                     + log4jInitErr.getCause());
 
             return cfgLog;
@@ -5540,6 +5592,24 @@ public abstract class IgniteUtils {
     }
 
     /**
+     * Writes long array to output stream.
+     *
+     * @param out Output stream to write to.
+     * @param arr Array to write.
+     * @throws IOException If write failed.
+     */
+    public static void writeLongArray(DataOutput out, @Nullable long[] arr) throws IOException {
+        if (arr == null)
+            out.writeInt(-1);
+        else {
+            out.writeInt(arr.length);
+
+            for (long b : arr)
+                out.writeLong(b);
+        }
+    }
+
+    /**
      * Reads boolean array from input stream accounting for <tt>null</tt> values.
      *
      * @param in Stream to read from.
@@ -5577,6 +5647,27 @@ public abstract class IgniteUtils {
 
         for (int i = 0; i < len; i++)
             res[i] = in.readInt();
+
+        return res;
+    }
+
+    /**
+     * Reads long array from input stream.
+     *
+     * @param in Stream to read from.
+     * @return Read long array, possibly <tt>null</tt>.
+     * @throws IOException If read failed.
+     */
+    @Nullable public static long[] readLongArray(DataInput in) throws IOException {
+        int len = in.readInt();
+
+        if (len == -1)
+            return null; // Value "-1" indicates null.
+
+        long[] res = new long[len];
+
+        for (int i = 0; i < len; i++)
+            res[i] = in.readLong();
 
         return res;
     }
@@ -6732,7 +6823,6 @@ public abstract class IgniteUtils {
      * Replaces all occurrences of {@code org.apache.ignite.} with {@code o.a.i.},
      * {@code org.apache.ignite.internal.} with {@code o.a.i.i.},
      * {@code org.apache.ignite.internal.visor.} with {@code o.a.i.i.v.} and
-     * {@code org.apache.ignite.scalar.} with {@code o.a.i.s.}.
      *
      * @param s String to replace in.
      * @return Replaces string.
@@ -6740,7 +6830,6 @@ public abstract class IgniteUtils {
     public static String compact(String s) {
         return s.replace("org.apache.ignite.internal.visor.", "o.a.i.i.v.").
             replace("org.apache.ignite.internal.", "o.a.i.i.").
-            replace("org.apache.ignite.scalar.", "o.a.i.s.").
             replace("org.apache.ignite.", "o.a.i.");
     }
 
@@ -7743,17 +7832,14 @@ public abstract class IgniteUtils {
     }
 
     /**
-     * Utility method creating {@link JMException} with given cause.
+     * Utility method creating {@link JMException} with given cause. Keeps only the error message to avoid
+     * deserialization failure on remote side due to the other class path.
      *
      * @param e Cause exception.
      * @return Newly created {@link JMException}.
      */
     public static JMException jmException(Throwable e) {
-        JMException x = new JMException();
-
-        x.initCause(e);
-
-        return x;
+        return new JMException(e.getMessage());
     }
 
     /**
@@ -7937,6 +8023,9 @@ public abstract class IgniteUtils {
      * @return {@code True} if Object is primitive array.
      */
     public static boolean isPrimitiveArray(Object obj) {
+        if (obj == null)
+            return false;
+
         Class<?> cls = obj.getClass();
 
         return cls.isArray() && cls.getComponentType().isPrimitive();
@@ -8895,66 +8984,6 @@ public abstract class IgniteUtils {
     }
 
     /**
-     * Adds no-op logger to remove no-appender warning.
-     *
-     * @return Tuple with root log and no-op appender instances. No-op appender can be {@code null}
-     *      if it did not found in classpath. Notice that in this case logging is not suppressed.
-     * @throws IgniteCheckedException In case of failure to add no-op logger for Log4j.
-     */
-    public static IgniteBiTuple<Object, Object> addLog4jNoOpLogger() throws IgniteCheckedException {
-        Object rootLog;
-        Object nullApp;
-
-        try {
-            // Add no-op logger to remove no-appender warning.
-            Class<?> logCls = Class.forName("org.apache.log4j.Logger");
-
-            rootLog = logCls.getMethod("getRootLogger").invoke(logCls);
-
-            try {
-                nullApp = Class.forName("org.apache.log4j.varia.NullAppender").newInstance();
-            }
-            catch (ClassNotFoundException ignore) {
-                // Can't found log4j no-op appender in classpath (for example, log4j was added through
-                // log4j-over-slf4j library. No-appender warning will not be suppressed.
-                return new IgniteBiTuple<>(rootLog, null);
-            }
-
-            Class appCls = Class.forName("org.apache.log4j.Appender");
-
-            rootLog.getClass().getMethod("addAppender", appCls).invoke(rootLog, nullApp);
-        }
-        catch (Exception e) {
-            throw new IgniteCheckedException("Failed to add no-op logger for Log4j.", e);
-        }
-
-        return new IgniteBiTuple<>(rootLog, nullApp);
-    }
-
-    /**
-     * Removes previously added no-op logger via method {@link #addLog4jNoOpLogger}.
-     *
-     * @param t Tuple with root log and null appender instances.
-     * @throws IgniteCheckedException In case of failure to remove previously added no-op logger for Log4j.
-     */
-    public static void removeLog4jNoOpLogger(IgniteBiTuple<Object, Object> t) throws IgniteCheckedException {
-        Object rootLog = t.get1();
-        Object nullApp = t.get2();
-
-        if (nullApp == null)
-            return;
-
-        try {
-            Class appenderCls = Class.forName("org.apache.log4j.Appender");
-
-            rootLog.getClass().getMethod("removeAppender", appenderCls).invoke(rootLog, nullApp);
-        }
-        catch (Exception e) {
-            throw new IgniteCheckedException("Failed to remove previously added no-op logger for Log4j.", e);
-        }
-    }
-
-    /**
      * Adds no-op console handler for root java logger.
      *
      * @return Removed handlers.
@@ -9636,20 +9665,62 @@ public abstract class IgniteUtils {
             String hostName = hostNamesIt.hasNext() ? hostNamesIt.next() : null;
 
             if (!F.isEmpty(hostName)) {
-                InetSocketAddress inetSockAddr = new InetSocketAddress(hostName, port);
+                InetSocketAddress inetSockAddr = createResolved(hostName, port);
 
-                if (inetSockAddr.isUnresolved() || inetSockAddr.getAddress().isLoopbackAddress())
-                    inetSockAddr = new InetSocketAddress(addr, port);
+                if (inetSockAddr.isUnresolved() ||
+                    (!inetSockAddr.isUnresolved() && inetSockAddr.getAddress().isLoopbackAddress())
+                )
+                    inetSockAddr = createResolved(addr, port);
 
                 res.add(inetSockAddr);
             }
 
             // Always append address because local and remote nodes may have the same hostname
-            // therefore remote hostname will be always resolved to local address.
-            res.add(new InetSocketAddress(addr, port));
+            // therefore remote hostname will always be resolved to local address.
+            res.add(createResolved(addr, port));
         }
 
         return res;
+    }
+
+    /**
+     * Creates a resolved inet socket address, writing the diagnostic information into a log if operation took
+     * a significant amount of time.
+     *
+     * @param addr Host address.
+     * @param port Port value.
+     * @return Resolved address.
+     */
+    private static InetSocketAddress createResolved(String addr, int port) {
+        log.log(Level.FINE, () -> S.toString(
+            "Resolving address",
+            "addr", addr, false,
+            "port", port, false,
+            "thread", Thread.currentThread().getName(), false
+        ));
+
+        long startNanos = System.nanoTime();
+
+        try {
+            return new InetSocketAddress(addr, port);
+        }
+        finally {
+            long endNanos = System.nanoTime();
+
+            long duration = endNanos - startNanos;
+
+            long threshold = U.millisToNanos(200);
+
+            if (duration > threshold) {
+                log.log(Level.FINE, new TimeoutException(), () -> S.toString(
+                    "Resolving address took too much time",
+                    "duration(ms)", U.nanosToMillis(duration), false,
+                    "addr", addr, false,
+                    "port", port, false,
+                    "thread", Thread.currentThread().getName(), false
+                ));
+            }
+        }
     }
 
     /**
@@ -10480,28 +10551,6 @@ public abstract class IgniteUtils {
     }
 
     /**
-     * @return Whether shared memory libraries exist.
-     */
-    public static boolean hasSharedMemory() {
-        if (hasShmem == null) {
-            if (isWindows())
-                hasShmem = false;
-            else {
-                try {
-                    IpcSharedMemoryNativeLoader.load(null);
-
-                    hasShmem = true;
-                }
-                catch (IgniteCheckedException ignore) {
-                    hasShmem = false;
-                }
-            }
-        }
-
-        return hasShmem;
-    }
-
-    /**
      * @param lock Lock.
      * @throws IgniteInterruptedCheckedException If interrupted.
      */
@@ -11105,7 +11154,8 @@ public abstract class IgniteUtils {
                     return FileVisitResult.CONTINUE;
                 }
             });
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IgniteCheckedException("walkFileTree will not throw IOException if the FileVisitor does not");
         }
 
@@ -11146,7 +11196,8 @@ public abstract class IgniteUtils {
                     return FileVisitResult.CONTINUE;
                 }
             });
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new IgniteCheckedException("walkFileTree will not throw IOException if the FileVisitor does not");
         }
 
@@ -12296,5 +12347,76 @@ public abstract class IgniteUtils {
                     throw e;
             }
         }
+    }
+
+    /**
+     * @return Language runtime.
+     */
+    public static String language(ClassLoader ldr) {
+        boolean scala = false;
+        boolean groovy = false;
+        boolean clojure = false;
+
+        for (StackTraceElement elem : Thread.currentThread().getStackTrace()) {
+            String s = elem.getClassName().toLowerCase();
+
+            if (s.contains("scala")) {
+                scala = true;
+
+                break;
+            }
+            else if (s.contains("groovy")) {
+                groovy = true;
+
+                break;
+            }
+            else if (s.contains("clojure")) {
+                clojure = true;
+
+                break;
+            }
+        }
+
+        if (scala) {
+            try (InputStream in = ldr.getResourceAsStream("/library.properties")) {
+                Properties props = new Properties();
+
+                if (in != null)
+                    props.load(in);
+
+                return "Scala ver. " + props.getProperty("version.number", "<unknown>");
+            }
+            catch (Exception ignore) {
+                return "Scala ver. <unknown>";
+            }
+        }
+
+        // How to get Groovy and Clojure version at runtime?!?
+        return groovy ? "Groovy" : clojure ? "Clojure" : U.jdkName() + " ver. " + U.jdkVersion();
+    }
+
+    /**
+     * @return {@code True} if remote JMX management is enabled - {@code false} otherwise.
+     */
+    public static boolean isJmxRemoteEnabled() {
+        return IGNITE_JMX_REMOTE_PROPERTY != null;
+    }
+
+    /**
+     * @return {@code true} if the REST processor is enabled, {@code false} the otherwise.
+     */
+    public static boolean isRestEnabled(IgniteConfiguration cfg) {
+        boolean isClientNode = cfg.isClientMode() || cfg.isDaemon();
+
+        // By default, rest processor doesn't start on client nodes.
+        return cfg.getConnectorConfiguration() != null &&
+            (!isClientNode || (isClientNode && IgniteSystemProperties.getBoolean(IGNITE_REST_START_ON_CLIENT)));
+    }
+
+    /**
+     * @return {@code True} if restart mode is enabled, {@code false} otherwise.
+     */
+    public static boolean isRestartEnabled() {
+        return IGNITE_SUCCESS_FILE_PROPERTY != null;
     }
 }

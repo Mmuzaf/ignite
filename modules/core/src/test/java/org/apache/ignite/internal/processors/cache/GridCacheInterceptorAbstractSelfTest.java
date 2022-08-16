@@ -47,9 +47,7 @@ import org.apache.ignite.transactions.TransactionIsolation;
 import org.jetbrains.annotations.Nullable;
 import org.junit.Before;
 import org.junit.Test;
-
 import static org.apache.ignite.cache.CacheAtomicityMode.TRANSACTIONAL;
-import static org.apache.ignite.cache.CacheMode.LOCAL;
 import static org.apache.ignite.cache.CacheMode.PARTITIONED;
 import static org.apache.ignite.cache.CacheMode.REPLICATED;
 
@@ -160,8 +158,7 @@ public abstract class GridCacheInterceptorAbstractSelfTest extends GridCacheAbst
 
         afterTest();
 
-        if (cacheMode() != LOCAL)
-            testGet(backupKey(0), false);
+        testGet(backupKey(0), false);
     }
 
     /**
@@ -173,8 +170,7 @@ public abstract class GridCacheInterceptorAbstractSelfTest extends GridCacheAbst
 
         afterTest();
 
-        if (cacheMode() != LOCAL)
-            testGet(backupKey(0), true);
+        testGet(backupKey(0), true);
     }
 
     /**
@@ -307,7 +303,8 @@ public abstract class GridCacheInterceptorAbstractSelfTest extends GridCacheAbst
             c = cache.getEntries(keys);
 
             assertTrue(c.isEmpty());
-        } else {
+        }
+        else {
             map = cache.getAll(keys);
 
             for (String key : keys)
@@ -436,11 +433,9 @@ public abstract class GridCacheInterceptorAbstractSelfTest extends GridCacheAbst
 
             afterTest();
 
-            if (cacheMode() != LOCAL) {
-                testCancelUpdate(backupKey(0), op);
+            testCancelUpdate(backupKey(0), op);
 
-                afterTest();
-            }
+            afterTest();
         }
     }
 
@@ -544,11 +539,9 @@ public abstract class GridCacheInterceptorAbstractSelfTest extends GridCacheAbst
 
             afterTest();
 
-            if (cacheMode() != LOCAL) {
-                testModifyUpdate(backupKey(0), op);
+            testModifyUpdate(backupKey(0), op);
 
-                afterTest();
-            }
+            afterTest();
         }
     }
 
@@ -620,11 +613,9 @@ public abstract class GridCacheInterceptorAbstractSelfTest extends GridCacheAbst
 
             afterTest();
 
-            if (cacheMode() != LOCAL) {
-                testCancelRemove(backupKey(0), op);
+            testCancelRemove(backupKey(0), op);
 
-                afterTest();
-            }
+            afterTest();
         }
     }
 
@@ -732,11 +723,9 @@ public abstract class GridCacheInterceptorAbstractSelfTest extends GridCacheAbst
 
             afterTest();
 
-            if (cacheMode() != LOCAL) {
-                testRemove(backupKey(0), op);
+            testRemove(backupKey(0), op);
 
-                afterTest();
-            }
+            afterTest();
         }
     }
 
@@ -950,17 +939,10 @@ public abstract class GridCacheInterceptorAbstractSelfTest extends GridCacheAbst
         String key2;
         String key3;
 
-        if (cacheMode() == LOCAL) {
-            key1 = "1";
-            key2 = "2";
-            key3 = "3";
-        }
-        else {
-            List<String> keys = primaryKeys(0, 2);
-            key1 = keys.get(0); // Need two keys for the same node to test atomic cache batch store upadte.
-            key2 = keys.get(1);
-            key3 = backupKey(0);
-        }
+        List<String> keys = primaryKeys(0, 2);
+        key1 = keys.get(0); // Need two keys for the same node to test atomic cache batch store upadte.
+        key2 = keys.get(1);
+        key3 = backupKey(0);
 
         map.put(key1, 1);
         map.put(key2, 2);
@@ -1039,17 +1021,10 @@ public abstract class GridCacheInterceptorAbstractSelfTest extends GridCacheAbst
         String key2;
         String key3;
 
-        if (cacheMode() == LOCAL) {
-            key1 = "1";
-            key2 = "2";
-            key3 = "3";
-        }
-        else {
-            List<String> keys = primaryKeys(0, 2);
-            key1 = keys.get(0);
-            key2 = keys.get(1);
-            key3 = backupKey(0);
-        }
+        List<String> keys = primaryKeys(0, 2);
+        key1 = keys.get(0);
+        key2 = keys.get(1);
+        key3 = backupKey(0);
 
         map.put(key1, 1);
         map.put(key2, 2);

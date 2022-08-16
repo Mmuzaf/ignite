@@ -283,7 +283,8 @@ public class GridDhtPartitionDemander {
                             @Override public void apply(IgniteInternalFuture<Boolean> fut1) {
                                 try {
                                     fut.onDone(fut1.get());
-                                } catch (Exception e) {
+                                }
+                                catch (Exception e) {
                                     fut.onDone(e);
                                 }
                             }
@@ -1252,10 +1253,12 @@ public class GridDhtPartitionDemander {
 
                 partitionsLeft.addAndGet(v.partitions().size());
 
-                rebalancingParts.put(k.id(), new HashSet<Integer>(v.partitions().size()) {{
-                    addAll(v.partitions().historicalSet());
-                    addAll(v.partitions().fullSet());
-                }});
+                HashSet<Integer> parts = new HashSet<>(v.partitions().size());
+
+                parts.addAll(v.partitions().historicalSet());
+                parts.addAll(v.partitions().fullSet());
+
+                rebalancingParts.put(k.id(), parts);
 
                 historical.addAll(v.partitions().historicalSet());
 
@@ -1692,7 +1695,14 @@ public class GridDhtPartitionDemander {
          * @param own {@code True} to own partition if possible.
          */
         private synchronized void partitionDone(UUID nodeId, int p, boolean own) {
-            if (own && grp.localWalEnabled())
+            // Partitions own one by one for in-memory caches.
+            // For persistent caches all partitions owns in batch by the end of rebalance
+            // (see `ctx.exchange().finishPreloading(topVer, grp.groupId(), rebalanceId);`)
+            // `localWalEnabled` always `true` for in-memory cache group (see `CacheGroupContext` constructor).
+            // If CDC enabled for cache group then `localWalEnabled` is `false` during rebalance
+            // to avoid unnecessary `DataRecord` logging. So we need additionally check for in-memory
+            // (persistenceEnabled=false) to decide should we own partition right now.
+            if (own && (grp.localWalEnabled() || !grp.persistenceEnabled()))
                 grp.topology().own(grp.topology().localPartition(p));
 
             if (isDone())
@@ -1784,6 +1794,9 @@ public class GridDhtPartitionDemander {
                     });
                 }
                 else {
+                    if (grp.cdcEnabled() && !grp.localWalEnabled() && !cancelled)
+                        grp.localWalEnabled(true, false);
+
                     onDone(!cancelled);
 
                     if (log.isDebugEnabled())

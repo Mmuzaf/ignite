@@ -69,7 +69,6 @@ public class H2PkHashIndex extends GridH2IndexBase {
      * @param colsList Index columns.
      * @param segments Segments.
      */
-    @SuppressWarnings("ZeroLengthArrayAllocation")
     public H2PkHashIndex(
         GridCacheContext<?, ?> cctx,
         GridH2Table tbl,
@@ -266,7 +265,7 @@ public class H2PkHashIndex extends GridH2IndexBase {
         /** {@inheritDoc} */
         @Override public Row get() {
             try {
-                return desc.createRow(curr.get());
+                return new H2CacheRow(desc, curr.get());
             }
             catch (IgniteCheckedException e) {
                 throw DbException.convert(e);

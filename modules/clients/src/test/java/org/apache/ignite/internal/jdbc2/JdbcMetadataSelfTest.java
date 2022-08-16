@@ -36,6 +36,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Set;
+import java.util.TreeSet;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.cache.QueryEntity;
 import org.apache.ignite.cache.QueryIndex;
@@ -319,7 +320,7 @@ public class JdbcMetadataSelfTest extends GridCommonAbstractTest {
      */
     @Test
     public void testGetAllView() throws Exception {
-        Set<String> expViews = new HashSet<>(Arrays.asList(
+        Set<String> expViews = new TreeSet<>(Arrays.asList(
             "BASELINE_NODES",
             "BASELINE_NODE_ATTRIBUTES",
             "CACHES",
@@ -361,10 +362,11 @@ public class JdbcMetadataSelfTest extends GridCommonAbstractTest {
             "DS_REENTRANTLOCKS",
             "STATISTICS_CONFIGURATION",
             "STATISTICS_PARTITION_DATA",
-            "STATISTICS_LOCAL_DATA"
+            "STATISTICS_LOCAL_DATA",
+            "STATISTICS_GLOBAL_DATA"
         ));
 
-        Set<String> actViews = new HashSet<>();
+        Set<String> actViews = new TreeSet<>();
 
         try (Connection conn = DriverManager.getConnection(BASE_URL)) {
             DatabaseMetaData meta = conn.getMetaData();
@@ -529,13 +531,15 @@ public class JdbcMetadataSelfTest extends GridCommonAbstractTest {
                     assertEquals(0, rs.getInt("NULLABLE"));
                     assertEquals(0, rs.getInt(11)); // nullable column by index
                     assertEquals("NO", rs.getString("IS_NULLABLE"));
-                } else if ("AGE".equals(name)) {
+                }
+                else if ("AGE".equals(name)) {
                     assertEquals(INTEGER, rs.getInt("DATA_TYPE"));
                     assertEquals("INTEGER", rs.getString("TYPE_NAME"));
                     assertEquals(0, rs.getInt("NULLABLE"));
                     assertEquals(0, rs.getInt(11)); // nullable column by index
                     assertEquals("NO", rs.getString("IS_NULLABLE"));
-                } else if ("ORGID".equals(name)) {
+                }
+                else if ("ORGID".equals(name)) {
                     assertEquals(INTEGER, rs.getInt("DATA_TYPE"));
                     assertEquals("INTEGER", rs.getString("TYPE_NAME"));
                     assertEquals(1, rs.getInt("NULLABLE"));
@@ -569,7 +573,8 @@ public class JdbcMetadataSelfTest extends GridCommonAbstractTest {
                     assertEquals(0, rs.getInt("NULLABLE"));
                     assertEquals(0, rs.getInt(11)); // nullable column by index
                     assertEquals("NO", rs.getString("IS_NULLABLE"));
-                } else if ("name".equals(name)) {
+                }
+                else if ("name".equals(name)) {
                     assertEquals(VARCHAR, rs.getInt("DATA_TYPE"));
                     assertEquals("VARCHAR", rs.getString("TYPE_NAME"));
                     assertEquals(1, rs.getInt("NULLABLE"));

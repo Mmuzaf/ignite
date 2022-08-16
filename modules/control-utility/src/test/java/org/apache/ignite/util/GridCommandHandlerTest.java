@@ -44,7 +44,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
@@ -61,6 +64,7 @@ import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteDataStreamer;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.ShutdownPolicy;
+import org.apache.ignite.cache.CacheAtomicityMode;
 import org.apache.ignite.cache.affinity.rendezvous.RendezvousAffinityFunction;
 import org.apache.ignite.cluster.BaselineNode;
 import org.apache.ignite.cluster.ClusterNode;
@@ -85,6 +89,7 @@ import org.apache.ignite.internal.processors.cache.GridCacheContext;
 import org.apache.ignite.internal.processors.cache.GridCacheEntryEx;
 import org.apache.ignite.internal.processors.cache.GridCacheMvccCandidate;
 import org.apache.ignite.internal.processors.cache.distributed.dht.GridDhtTxFinishRequest;
+import org.apache.ignite.internal.processors.cache.distributed.dht.atomic.GridDhtAtomicSingleUpdateRequest;
 import org.apache.ignite.internal.processors.cache.distributed.near.GridNearLockResponse;
 import org.apache.ignite.internal.processors.cache.distributed.near.GridNearTxFinishRequest;
 import org.apache.ignite.internal.processors.cache.distributed.near.GridNearTxLocal;
@@ -104,9 +109,11 @@ import org.apache.ignite.internal.processors.cache.warmup.BlockedWarmUpStrategy;
 import org.apache.ignite.internal.processors.cache.warmup.WarmUpTestPluginProvider;
 import org.apache.ignite.internal.processors.cluster.ChangeGlobalStateFinishMessage;
 import org.apache.ignite.internal.processors.cluster.GridClusterStateProcessor;
+import org.apache.ignite.internal.util.BasicRateLimiter;
 import org.apache.ignite.internal.util.future.IgniteFinishedFutureImpl;
 import org.apache.ignite.internal.util.lang.GridAbsPredicate;
 import org.apache.ignite.internal.util.lang.GridFunc;
+import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.internal.util.typedef.G;
 import org.apache.ignite.internal.util.typedef.X;
 import org.apache.ignite.internal.util.typedef.internal.CU;
@@ -133,9 +140,11 @@ import org.junit.Test;
 
 import static java.io.File.separatorChar;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_CLUSTER_NAME;
+import static org.apache.ignite.cache.CacheAtomicityMode.ATOMIC;
 import static org.apache.ignite.cache.CacheAtomicityMode.TRANSACTIONAL;
 import static org.apache.ignite.cache.CacheMode.PARTITIONED;
 import static org.apache.ignite.cache.CacheWriteSynchronizationMode.FULL_SYNC;
+import static org.apache.ignite.cache.CacheWriteSynchronizationMode.PRIMARY_SYNC;
 import static org.apache.ignite.cache.PartitionLossPolicy.READ_ONLY_SAFE;
 import static org.apache.ignite.cluster.ClusterState.ACTIVE;
 import static org.apache.ignite.cluster.ClusterState.ACTIVE_READ_ONLY;
@@ -158,7 +167,10 @@ import static org.apache.ignite.internal.encryption.AbstractEncryptionTest.MASTE
 import static org.apache.ignite.internal.processors.cache.persistence.GridCacheDatabaseSharedManager.IGNITE_PDS_SKIP_CHECKPOINT_ON_NODE_STOP;
 import static org.apache.ignite.internal.processors.cache.persistence.snapshot.AbstractSnapshotSelfTest.doSnapshotCancellationTest;
 import static org.apache.ignite.internal.processors.cache.persistence.snapshot.AbstractSnapshotSelfTest.snp;
+import static org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteSnapshotManager.SNAPSHOT_LIMITED_TRANSFER_BLOCK_SIZE_BYTES;
 import static org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteSnapshotManager.SNAPSHOT_METRICS;
+import static org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteSnapshotManager.SNAPSHOT_TRANSFER_RATE_DMS_KEY;
+import static org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteSnapshotManager.resolveSnapshotWorkDirectory;
 import static org.apache.ignite.internal.processors.cache.verify.IdleVerifyUtility.GRID_NOT_IDLE_MSG;
 import static org.apache.ignite.internal.processors.diagnostic.DiagnosticProcessor.DEFAULT_TARGET_FOLDER;
 import static org.apache.ignite.testframework.GridTestUtils.assertContains;
@@ -967,7 +979,10 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
 
         CountDownLatch latch = getNewStateLatch(ignite.cluster().state(), state);
 
-        assertEquals(EXIT_CODE_OK, execute("--set-state", strState));
+        if (state == INACTIVE)
+            assertEquals(EXIT_CODE_OK, execute("--set-state", strState, "--force"));
+        else
+            assertEquals(EXIT_CODE_OK, execute("--set-state", strState));
 
         latch.await(getTestTimeout(), TimeUnit.MILLISECONDS);
 
@@ -987,8 +1002,8 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
         }
     }
 
-   /** */
-   private CountDownLatch getNewStateLatch(ClusterState oldState, ClusterState newState) {
+    /** */
+    private CountDownLatch getNewStateLatch(ClusterState oldState, ClusterState newState) {
         if (oldState != newState) {
             CountDownLatch latch = new CountDownLatch(G.allGrids().size());
 
@@ -1001,7 +1016,7 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
         }
         else
             return new CountDownLatch(0);
-   }
+    }
 
     /**
      * Test baseline collect works via control.sh
@@ -1770,14 +1785,14 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
 
         // Test kill by xid.
         validate(h, map -> {
-                assertEquals(1, map.size());
+            assertEquals(1, map.size());
 
-                Map.Entry<ClusterNode, VisorTxTaskResult> killedEntry = map.entrySet().iterator().next();
+            Map.Entry<ClusterNode, VisorTxTaskResult> killedEntry = map.entrySet().iterator().next();
 
-                VisorTxInfo info = killedEntry.getValue().getInfos().get(0);
+            VisorTxInfo info = killedEntry.getValue().getInfos().get(0);
 
-                assertEquals(toKill[0].getXid(), info.getXid());
-            }, "--tx", "--kill",
+            assertEquals(toKill[0].getXid(), info.getXid());
+        }, "--tx", "--kill",
             "--xid", toKill[0].getXid().toString(), // Use saved on first run value.
             "--nodes", grid(0).localNode().consistentId().toString());
 
@@ -2299,6 +2314,162 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
         }
         else
             fail("Should be found dump with conflicts");
+    }
+
+    /**
+     * Tests that idle verify checks gaps.
+     */
+    @Test
+    public void testCacheIdleVerifyChecksGapsAtomic() throws Exception {
+        testCacheIdleVerifyChecksGaps(ATOMIC);
+    }
+
+    /**
+     * Tests that idle verify checks gaps.
+     */
+    @Test
+    public void testCacheIdleVerifyChecksGapsTx() throws Exception {
+        testCacheIdleVerifyChecksGaps(TRANSACTIONAL);
+    }
+
+    /**
+     * Tests that idle verify checks gaps.
+     */
+    private void testCacheIdleVerifyChecksGaps(CacheAtomicityMode atomicityMode) throws Exception {
+        int parts = 1;
+
+        IgniteEx ignite = startGrids(3);
+
+        ignite.cluster().active(true);
+
+        int backups = 2;
+
+        IgniteCache<Object, Object> cache = ignite.createCache(new CacheConfiguration<>()
+            .setAffinity(new RendezvousAffinityFunction(false, parts))
+            .setBackups(backups)
+            .setName(DEFAULT_CACHE_NAME)
+            .setAtomicityMode(atomicityMode)
+            .setWriteSynchronizationMode(PRIMARY_SYNC)
+            .setReadFromBackup(true));
+
+        int cnt = 0;
+
+        for (int i = 0; i < 100; i++) {
+            cache.put(i, i);
+
+            cnt++;
+        }
+
+        int cntFrom = cnt;
+
+        Ignite prim = primaryNode(0L, DEFAULT_CACHE_NAME);
+        Ignite backup = backupNode(0L, DEFAULT_CACHE_NAME);
+
+        TestRecordingCommunicationSpi primSpi = TestRecordingCommunicationSpi.spi(prim);
+
+        AtomicReference<CountDownLatch> latchRef = new AtomicReference<>();
+
+        primSpi.blockMessages(new IgniteBiPredicate<ClusterNode, Message>() {
+            @Override public boolean apply(ClusterNode node, Message msg) {
+                if (msg instanceof GridDhtTxFinishRequest ||
+                    msg instanceof GridDhtAtomicSingleUpdateRequest) {
+                    CountDownLatch blockLatch = latchRef.get();
+
+                    boolean block = blockLatch.getCount() > 0;
+
+                    blockLatch.countDown();
+
+                    return block; // Generating counter gaps.
+                }
+                else
+                    return false;
+            }
+        });
+
+        int blockedKey = cntFrom + 1_000;
+        int committedKey = blockedKey + 1_000;
+
+        int blockedFrom = blockedKey;
+        int committedFrom = committedKey;
+
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+
+        List<String> gaps = new ArrayList<>();
+
+        Consumer<Integer> cachePut = (key) -> {
+            if (atomicityMode == TRANSACTIONAL)
+                try (Transaction tx = prim.transactions().txStart()) {
+                    prim.cache(DEFAULT_CACHE_NAME).put(key, key);
+
+                    tx.commit();
+                }
+            else
+                prim.cache(DEFAULT_CACHE_NAME).put(key, key);
+        };
+
+        for (int it = 0; it < 10; it++) {
+            int range = rnd.nextInt(3);
+
+            CountDownLatch blockLatch = new CountDownLatch(backups * range);
+
+            latchRef.set(blockLatch);
+
+            for (int i = 0; i < range; i++) {
+                cachePut.accept(blockedKey++);
+
+                cnt++;
+            }
+
+            if (range == 1)
+                gaps.add(String.valueOf(cnt));
+            else if (range > 1)
+                gaps.add((cnt - range + 1) + " - " + cnt);
+
+            blockLatch.await();
+
+            for (int i = 0; i < range; i++) {
+                cachePut.accept(committedKey++);
+
+                cnt++;
+            }
+        }
+
+        for (int key = blockedFrom; key < blockedKey; key++) {
+            assertNotNull(prim.getOrCreateCache(DEFAULT_CACHE_NAME).get(key));
+            assertNull(backup.getOrCreateCache(DEFAULT_CACHE_NAME).get(key)); // Commit is blocked.
+        }
+
+        for (int key = committedFrom; key < committedKey; key++) {
+            assertNotNull(prim.getOrCreateCache(DEFAULT_CACHE_NAME).get(key));
+            assertNotNull(backup.getOrCreateCache(DEFAULT_CACHE_NAME).get(key));
+        }
+
+        G.restart(true);
+
+        ignite.cluster().active(true);
+
+        awaitPartitionMapExchange();
+
+        injectTestSystemOut();
+
+        assertEquals(EXIT_CODE_OK, execute("--cache", "idle_verify"));
+
+        if (atomicityMode == TRANSACTIONAL) {
+            assertContains(log, testOut.toString(), "conflict partitions has been found: [counterConflicts=1, " +
+                "hashConflicts=1]");
+
+            assertContains(log, testOut.toString(),
+                "updateCntr=[lwm=" + cnt + ", missed=[], hwm=" + cnt + "]"); // Primary
+
+            assertContains(log, testOut.toString(),
+                "updateCntr=[lwm=" + cntFrom + ", missed=" + gaps + ", hwm=" + cnt + "]"); // Backups.
+        }
+        else {
+            assertContains(log, testOut.toString(), "conflict partitions has been found: [counterConflicts=0, " +
+                "hashConflicts=1]");
+
+            assertContains(log, testOut.toString(), "updateCntr=" + cnt); // All
+        }
     }
 
     /**
@@ -2990,7 +3161,68 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
 
     /** @throws Exception If failed. */
     @Test
+    public void testChangeSnapshotTransferRateInRuntime() throws Exception {
+        int keysCnt = 10_000;
+
+        IgniteConfiguration cfg = optimize(getConfiguration(getTestIgniteInstanceName(0)))
+            .setSnapshotThreadPoolSize(1);
+
+        IgniteEx ignite = startGrid(cfg);
+
+        ignite.cluster().state(ACTIVE);
+
+        createCacheAndPreload(ignite, keysCnt);
+
+        // Estimate snapshot creation time.
+        long start = System.currentTimeMillis();
+
+        ignite.snapshot().createSnapshot("snapshot1").get(getTestTimeout());
+
+        long maxOpTime = (System.currentTimeMillis() - start) * 2;
+
+        Function<Integer, Integer> propFunc =
+            (num) -> execute("--property", "set", "--name", SNAPSHOT_TRANSFER_RATE_DMS_KEY, "--val", String.valueOf(num));
+
+        int rate = SNAPSHOT_LIMITED_TRANSFER_BLOCK_SIZE_BYTES;
+
+        // Limit the transfer rate.
+        assertEquals(EXIT_CODE_OK, (int)propFunc.apply(rate));
+
+        IgniteFuture<Void> snpFut = ignite.snapshot().createSnapshot("snapshot2");
+
+        // Make sure that the operation has been slowed down.
+        U.sleep(maxOpTime);
+        assertFalse(snpFut.isDone());
+
+        // Set transfer rate to unlimited.
+        assertEquals(EXIT_CODE_OK, (int)propFunc.apply(0));
+
+        // Add release time of BasicRateLimiter#acquire() for the given rate.
+        BasicRateLimiter limiter = new BasicRateLimiter(rate);
+
+        limiter.acquire(SNAPSHOT_LIMITED_TRANSFER_BLOCK_SIZE_BYTES);
+        limiter.acquire(SNAPSHOT_LIMITED_TRANSFER_BLOCK_SIZE_BYTES);
+
+        snpFut.get(maxOpTime);
+    }
+
+    /** @throws Exception If failed. */
+    @Test
     public void testClusterSnapshotCreate() throws Exception {
+        doClusterSnapshotCreate(false);
+    }
+
+    /** @throws Exception If failed. */
+    @Test
+    public void testClusterSnapshotCreateSynchronously() throws Exception {
+        doClusterSnapshotCreate(true);
+    }
+
+    /**
+     * @param syncMode Execute operation synchrnously.
+     * @throws Exception If failed.
+     */
+    private void doClusterSnapshotCreate(boolean syncMode) throws Exception {
         int keysCnt = 100;
         String snpName = "snapshot_02052020";
 
@@ -3001,15 +3233,33 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
 
         createCacheAndPreload(ig, keysCnt);
 
+        injectTestSystemOut();
+
         CommandHandler h = new CommandHandler();
 
-        assertEquals(EXIT_CODE_OK, execute(h, "--snapshot", "create", snpName));
+        // Invalid command syntax check.
+        assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "create", snpName, "blah"));
+        assertContains(log, testOut.toString(), "Invalid argument: blah. Possible options: --sync, --dest.");
 
-        assertTrue("Waiting for snapshot operation end failed.",
-            waitForCondition(() ->
-                    ig.context().metric().registry(SNAPSHOT_METRICS)
-                        .<LongMetric>findMetric("LastSnapshotEndTime").value() > 0,
-                getTestTimeout()));
+        assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "create", snpName, "--sync", "blah"));
+        assertContains(log, testOut.toString(), "Invalid argument: blah.");
+
+        List<String> args = new ArrayList<>(F.asList("--snapshot", "create", snpName));
+
+        if (syncMode)
+            args.add("--sync");
+
+        assertEquals(EXIT_CODE_OK, execute(h, args));
+
+        LongMetric opEndTimeMetric = ig.context().metric().registry(SNAPSHOT_METRICS).findMetric("LastSnapshotEndTime");
+        BooleanSupplier endTimeMetricPredicate = () -> opEndTimeMetric.value() > 0;
+
+        if (syncMode)
+            assertTrue(endTimeMetricPredicate.getAsBoolean());
+        else {
+            assertTrue("Waiting for snapshot operation end failed.",
+                waitForCondition(endTimeMetricPredicate::getAsBoolean, getTestTimeout()));
+        }
 
         assertContains(log, (String)h.getLastOperationResult(), snpName);
 
@@ -3082,7 +3332,71 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
 
     /** @throws Exception If fails. */
     @Test
+    public void testSnapshotRestoreSynchronously() throws Exception {
+        String snpName = "snapshot_02052020";
+        int keysCnt = 100;
+
+        IgniteEx ig = startGrids(2);
+
+        ig.cluster().state(ACTIVE);
+
+        injectTestSystemOut();
+
+        String cacheName = "test-cache";
+
+        createCacheAndPreload(ig, cacheName, keysCnt, 32, null);
+
+        ig.snapshot().createSnapshot(snpName).get(getTestTimeout());
+
+        CommandHandler h = new CommandHandler();
+
+        autoConfirmation = false;
+
+        // Invalid command syntax checks.
+        assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "restore", snpName));
+        assertContains(log, testOut.toString(), "One of [--start, --cancel, --status] is expected.");
+
+        assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "restore", snpName, "--cancel", "--sync"));
+        assertContains(log, testOut.toString(), "Invalid argument: --sync.");
+
+        assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "restore", snpName, "blah"));
+        assertContains(log, testOut.toString(), "Invalid argument: blah. One of [--start, --cancel, --status] is expected.");
+
+        assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "restore", snpName, "--status", "--sync"));
+        assertContains(log, testOut.toString(), "Invalid argument: --sync. Action \"--status\" does not support specified option.");
+
+        assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "restore", snpName, "--sync", "--start"));
+        assertContains(log, testOut.toString(), "Invalid argument: --sync.");
+
+        assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "restore", snpName, "--start", "blah"));
+        assertContains(log, testOut.toString(), "Invalid argument: blah. Possible options: --groups, --src, --sync.");
+
+        autoConfirmation = true;
+
+        // Cache exists.
+        assertEquals(EXIT_CODE_UNEXPECTED_ERROR, execute(h, "--snapshot", "restore", snpName, "--start", "--sync"));
+        assertContains(log, testOut.toString(), "Unable to restore cache group - directory is not empty. " +
+            "Cache group should be destroyed manually before perform restore operation [group=" + cacheName);
+
+        ig.cache(cacheName).destroy();
+        awaitPartitionMapExchange();
+
+        assertEquals(EXIT_CODE_OK, execute(h, "--snapshot", "restore", snpName, "--start", "--sync"));
+        assertContains(log, testOut.toString(), "Snapshot cache group restore operation completed successfully");
+
+        IgniteCache<Object, Object> cache = ig.cache(cacheName);
+
+        assertNotNull(cache);
+
+        for (int i = 0; i < keysCnt; i++)
+            assertEquals("key=" + i, i, cache.get(i));
+    }
+
+    /** @throws Exception If fails. */
+    @Test
     public void testSnapshotRestore() throws Exception {
+        autoConfirmation = false;
+
         int keysCnt = 100;
         String snpName = "snapshot_02052020";
         String cacheName1 = "cache1";
@@ -3094,6 +3408,7 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
         ig.cluster().state(ACTIVE);
 
         injectTestSystemOut();
+        injectTestSystemIn(CONFIRM_MSG);
 
         createCacheAndPreload(ig, cacheName1, keysCnt, 32, null);
         createCacheAndPreload(ig, cacheName2, keysCnt, 32, null);
@@ -3117,8 +3432,12 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
 
         CommandHandler h = new CommandHandler();
 
+        assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "restore", snpName, "--start", cacheName1));
+        assertContains(log, testOut.toString(),
+            "Invalid argument: " + cacheName1 + ". Possible options: --groups, --src, --sync.");
+
         // Restore single cache group.
-        assertEquals(EXIT_CODE_OK, execute(h, "--snapshot", "restore", snpName, "--start", cacheName1));
+        assertEquals(EXIT_CODE_OK, execute(h, "--snapshot", "restore", snpName, "--start", "--groups", cacheName1));
         assertContains(log, testOut.toString(),
             "Snapshot cache group restore operation started [snapshot=" + snpName + ", group(s)=" + cacheName1 + ']');
 
@@ -3139,8 +3458,10 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
         assertNull(ig.cache(cacheName2));
         assertNull(ig.cache(cacheName3));
 
+        String cacheNames = cacheName1 + ',' + cacheName2;
+
         // Restore two (of three) groups of caches.
-        assertEquals(EXIT_CODE_OK, execute(h, "--snapshot", "restore", snpName, "--start", cacheName1 + ',' + cacheName2));
+        assertEquals(EXIT_CODE_OK, execute(h, "--snapshot", "restore", snpName, "--start", "--groups", cacheNames));
         assertContains(log, testOut.toString(),
             "Snapshot cache group restore operation started [snapshot=" + snpName + ", group(s)=");
 
@@ -3169,8 +3490,9 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
 
         // Restore all public cache groups.
         assertEquals(EXIT_CODE_OK, execute(h, "--snapshot", "restore", snpName, "--start"));
-        assertContains(log, testOut.toString(),
-            "Snapshot cache group restore operation started [snapshot=" + snpName + ']');
+        String out = testOut.toString();
+        assertContains(log, out, "Warning: command will restore ALL USER-CREATED CACHE GROUPS from the snapshot");
+        assertContains(log, out, "Snapshot cache group restore operation started [snapshot=" + snpName + ']');
 
         waitForCondition(() -> ig.cache(cacheName1) != null, getTestTimeout());
         waitForCondition(() -> ig.cache(cacheName2) != null, getTestTimeout());
@@ -3188,6 +3510,61 @@ public class GridCommandHandlerTest extends GridCommandHandlerClusterPerMethodAb
             assertEquals(cacheName1, Integer.valueOf(i), cache1.get(i));
             assertEquals(cacheName2, Integer.valueOf(i), cache2.get(i));
             assertEquals(cacheName3, Integer.valueOf(i), cache2.get(i));
+        }
+    }
+
+    /** @throws Exception If fails. */
+    @Test
+    public void testSnapshotCreateCheckAndRestoreCustomDir() throws Exception {
+        int keysCnt = 100;
+        String snpName = "snapshot_30052022";
+        File snpDir = U.resolveWorkDirectory(U.defaultWorkDirectory(), "ex_snapshots", true);
+
+        assertTrue("Target directory is not empty: " + snpDir, F.isEmpty(snpDir.list()));
+
+        try {
+            Ignite ignite = startGrids(2);
+            ignite.cluster().state(ACTIVE);
+
+            createCacheAndPreload(ignite, keysCnt);
+
+            injectTestSystemOut();
+            CommandHandler h = new CommandHandler();
+
+            assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "create", snpName, "--dest", "A", "--dest", "B"));
+            assertContains(log, testOut.toString(), "--dest arg specified twice.");
+
+            assertEquals(EXIT_CODE_OK,
+                execute(h, "--snapshot", "create", snpName, "--sync", "--dest", snpDir.getAbsolutePath()));
+
+            ignite.destroyCache(DEFAULT_CACHE_NAME);
+
+            assertEquals(EXIT_CODE_INVALID_ARGUMENTS, execute(h, "--snapshot", "restore", snpName, "--start", "--sync"));
+            assertContains(log, testOut.toString(), "Snapshot does not exists [snapshot=" + snpName);
+
+            assertEquals(EXIT_CODE_INVALID_ARGUMENTS,
+                execute(h, "--snapshot", "restore", snpName, "--start", "--src", "A", "--src", "B"));
+            assertContains(log, testOut.toString(), "--src arg specified twice.");
+
+            // The check command simply prints the results of the check, it always ends with a zero exit code.
+            assertEquals(EXIT_CODE_OK, execute(h, "--snapshot", "check", snpName));
+            assertContains(log, testOut.toString(), "Snapshot does not exists [snapshot=" + snpName);
+
+            assertEquals(EXIT_CODE_OK, execute(h, "--snapshot", "check", snpName, "--src", snpDir.getAbsolutePath()));
+            assertContains(log, testOut.toString(), "The check procedure has finished, no conflicts have been found.");
+
+            assertEquals(EXIT_CODE_OK,
+                execute(h, "--snapshot", "restore", snpName, "--start", "--sync", "--src", snpDir.getAbsolutePath()));
+
+            IgniteCache<Integer, Integer> cache = ignite.cache(DEFAULT_CACHE_NAME);
+
+            assertEquals(keysCnt, cache.size());
+
+            for (int i = 0; i < keysCnt; i++)
+                assertEquals(Integer.valueOf(i), cache.get(i));
+        }
+        finally {
+            U.delete(snpDir);
         }
     }
 

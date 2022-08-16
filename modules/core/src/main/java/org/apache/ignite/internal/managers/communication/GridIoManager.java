@@ -155,6 +155,7 @@ import static org.apache.ignite.internal.GridTopic.TOPIC_IO_TEST;
 import static org.apache.ignite.internal.IgniteFeatures.CHANNEL_COMMUNICATION;
 import static org.apache.ignite.internal.IgniteFeatures.nodeSupports;
 import static org.apache.ignite.internal.managers.communication.GridIoPolicy.AFFINITY_POOL;
+import static org.apache.ignite.internal.managers.communication.GridIoPolicy.CALLER_THREAD;
 import static org.apache.ignite.internal.managers.communication.GridIoPolicy.DATA_STREAMER_POOL;
 import static org.apache.ignite.internal.managers.communication.GridIoPolicy.IDX_POOL;
 import static org.apache.ignite.internal.managers.communication.GridIoPolicy.MANAGEMENT_POOL;
@@ -1322,14 +1323,13 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
                 case QUERY_POOL:
                 case SCHEMA_POOL:
                 case SERVICE_POOL:
-                {
+                case CALLER_THREAD:
                     if (msg.isOrdered())
                         processOrderedMessage(nodeId, msg, plc, msgC);
                     else
                         processRegularMessage(nodeId, msg, plc, msgC);
 
                     break;
-                }
 
                 default:
                     assert plc >= 0 : "Negative policy [plc=" + plc + ", msg=" + msg + ']';
@@ -1451,7 +1451,7 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
             /*if (msg0.processedFromNioThread())
                 c.run();
             else*/
-                ctx.pools().getStripedExecutorService().execute(-1, c);
+            ctx.pools().getStripedExecutorService().execute(-1, c);
 
             return;
         }
@@ -1926,9 +1926,11 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
      * @return {@code True} if node left.
      * @throws IgniteClientDisconnectedCheckedException If ping failed.
      */
-    public boolean checkNodeLeft(UUID nodeId, IgniteCheckedException sndErr, boolean ping)
-        throws IgniteClientDisconnectedCheckedException
-    {
+    public boolean checkNodeLeft(
+        UUID nodeId,
+        IgniteCheckedException sndErr,
+        boolean ping
+    ) throws IgniteClientDisconnectedCheckedException {
         return sndErr instanceof ClusterTopologyCheckedException ||
             ctx.discovery().node(nodeId) == null ||
             (ping && !ctx.discovery().pingNode(nodeId));
@@ -2265,8 +2267,8 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         GridTopic topic,
         Message msg,
         byte plc,
-        IgniteInClosure<IgniteException> ackC) throws IgniteCheckedException
-    {
+        IgniteInClosure<IgniteException> ackC
+    ) throws IgniteCheckedException {
         send(node, topic, topic.ordinal(), msg, plc, false, 0, false, ackC, false);
     }
 
@@ -2380,8 +2382,8 @@ public class GridIoManager extends GridManagerAdapter<CommunicationSpi<Serializa
         @Nullable Object topic,
         boolean ordered,
         long timeout,
-        boolean async) throws IgniteCheckedException
-    {
+        boolean async
+    ) throws IgniteCheckedException {
         boolean loc = nodes.size() == 1 && F.first(nodes).id().equals(locNodeId);
 
         byte[] serMsg = null;

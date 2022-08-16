@@ -78,7 +78,6 @@ import org.apache.ignite.internal.processors.cache.distributed.near.GridNearCach
 import org.apache.ignite.internal.processors.cache.distributed.near.GridNearTransactionalCache;
 import org.apache.ignite.internal.processors.cache.dr.GridCacheDrManager;
 import org.apache.ignite.internal.processors.cache.jta.CacheJtaManagerAdapter;
-import org.apache.ignite.internal.processors.cache.local.GridLocalCache;
 import org.apache.ignite.internal.processors.cache.persistence.DataRegion;
 import org.apache.ignite.internal.processors.cache.query.GridCacheQueryManager;
 import org.apache.ignite.internal.processors.cache.query.continuous.CacheContinuousQueryManager;
@@ -115,7 +114,6 @@ import org.apache.ignite.marshaller.Marshaller;
 import org.apache.ignite.plugin.security.SecurityException;
 import org.apache.ignite.plugin.security.SecurityPermission;
 import org.jetbrains.annotations.Nullable;
-
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_DISABLE_TRIGGERING_CACHE_INTERCEPTOR_ON_CONFLICT;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_READ_LOAD_BALANCING;
 import static org.apache.ignite.cache.CacheAtomicityMode.ATOMIC;
@@ -645,13 +643,6 @@ public class GridCacheContext<K, V> implements Externalizable {
     }
 
     /**
-     * @return Local cache.
-     */
-    public GridLocalCache<K, V> local() {
-        return (GridLocalCache<K, V>)cache;
-    }
-
-    /**
      * @return {@code True} if cache is DHT.
      */
     public boolean isDht() {
@@ -677,13 +668,6 @@ public class GridCacheContext<K, V> implements Externalizable {
      */
     public boolean isNear() {
         return cache != null && cache.isNear();
-    }
-
-    /**
-     * @return {@code True} if cache is local.
-     */
-    public boolean isLocal() {
-        return cache != null && cache.isLocal();
     }
 
     /**
@@ -1654,6 +1638,11 @@ public class GridCacheContext<K, V> implements Externalizable {
         return conflictRslvr != null;
     }
 
+    /** @return Conflict resolver. */
+    public CacheVersionConflictResolver conflictResolver() {
+        return conflictRslvr;
+    }
+
     /**
      * Resolve DR conflict.
      *
@@ -1766,7 +1755,7 @@ public class GridCacheContext<K, V> implements Externalizable {
      * @param keepBinary Keep binary flag.
      * @return Unwrapped collection.
      */
-    public Collection<Object> unwrapBinariesIfNeeded(Collection<Object> col, boolean keepBinary) {
+    public Collection<Object> unwrapBinariesIfNeeded(Collection<?> col, boolean keepBinary) {
         return CacheObjectUtils.unwrapBinariesIfNeeded(cacheObjCtx, col, keepBinary);
     }
 

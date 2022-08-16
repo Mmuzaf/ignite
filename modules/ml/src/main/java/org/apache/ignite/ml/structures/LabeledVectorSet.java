@@ -89,7 +89,7 @@ public class LabeledVectorSet<Row extends LabeledVector> extends Dataset<Row> im
      * @param lbs Labels of observations.
      */
     public LabeledVectorSet(double[][] mtx, double[] lbs) {
-       this(mtx, lbs, null);
+        this(mtx, lbs, null);
     }
 
     /**
@@ -125,7 +125,8 @@ public class LabeledVectorSet<Row extends LabeledVector> extends Dataset<Row> im
             for (int j = 0; j < colSize; j++) {
                 try {
                     data[i].features().set(j, mtx[i][j]);
-                } catch (ArrayIndexOutOfBoundsException e) {
+                }
+                catch (ArrayIndexOutOfBoundsException e) {
                     throw new NoDataException("No data in given matrix by coordinates (" + i + "," + j + ")");
                 }
             }
@@ -179,7 +180,7 @@ public class LabeledVectorSet<Row extends LabeledVector> extends Dataset<Row> im
 
     /** */
     public static Vector emptyVector(int size) {
-            return new DenseVector(size);
+        return new DenseVector(size);
     }
 
     /** Makes copy with new Label objects and old features and Metadata objects. */

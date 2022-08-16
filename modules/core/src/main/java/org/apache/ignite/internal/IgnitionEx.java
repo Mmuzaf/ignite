@@ -141,7 +141,6 @@ import static org.apache.ignite.IgniteSystemProperties.IGNITE_LOCAL_HOST;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_NO_SHUTDOWN_HOOK;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_OVERRIDE_CONSISTENT_ID;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_RESTART_CODE;
-import static org.apache.ignite.IgniteSystemProperties.IGNITE_SUCCESS_FILE;
 import static org.apache.ignite.IgniteSystemProperties.IGNITE_SYSTEM_WORKER_BLOCKED_TIMEOUT;
 import static org.apache.ignite.cache.CacheAtomicityMode.TRANSACTIONAL;
 import static org.apache.ignite.cache.CacheMode.PARTITIONED;
@@ -151,6 +150,7 @@ import static org.apache.ignite.cache.CacheWriteSynchronizationMode.FULL_SYNC;
 import static org.apache.ignite.configuration.MemoryConfiguration.DFLT_MEMORY_POLICY_MAX_SIZE;
 import static org.apache.ignite.configuration.MemoryConfiguration.DFLT_MEM_PLC_DEFAULT_NAME;
 import static org.apache.ignite.internal.IgniteComponentType.SPRING;
+import static org.apache.ignite.internal.util.IgniteUtils.EMPTY_STRS;
 import static org.apache.ignite.plugin.segmentation.SegmentationPolicy.RESTART_JVM;
 
 /**
@@ -475,7 +475,7 @@ public class IgnitionEx {
      * @see Ignition#RESTART_EXIT_CODE
      */
     public static void restart(boolean cancel) {
-        String file = System.getProperty(IGNITE_SUCCESS_FILE);
+        String file = U.IGNITE_SUCCESS_FILE_PROPERTY;
 
         if (file == null)
             U.warn(null, "Cannot restart node when restart not enabled.");
@@ -724,7 +724,7 @@ public class IgnitionEx {
      *      been started or Spring XML configuration file is invalid.
      */
     public static IgniteBiTuple<Collection<IgniteConfiguration>, ? extends GridSpringResourceContext>
-    loadConfigurations(URL springCfgUrl) throws IgniteCheckedException {
+        loadConfigurations(URL springCfgUrl) throws IgniteCheckedException {
         IgniteSpringHelper spring = SPRING.create(false);
 
         return spring.loadConfigurations(springCfgUrl);
@@ -744,7 +744,7 @@ public class IgnitionEx {
      *      been started or Spring XML configuration file is invalid.
      */
     public static IgniteBiTuple<Collection<IgniteConfiguration>, ? extends GridSpringResourceContext>
-    loadConfigurations(InputStream springCfgStream) throws IgniteCheckedException {
+        loadConfigurations(InputStream springCfgStream) throws IgniteCheckedException {
         IgniteSpringHelper spring = SPRING.create(false);
 
         return spring.loadConfigurations(springCfgStream);
@@ -764,7 +764,7 @@ public class IgnitionEx {
      *      been started or Spring XML configuration file is invalid.
      */
     public static IgniteBiTuple<Collection<IgniteConfiguration>, ? extends GridSpringResourceContext>
-    loadConfigurations(String springCfgPath) throws IgniteCheckedException {
+        loadConfigurations(String springCfgPath) throws IgniteCheckedException {
         A.notNull(springCfgPath, "springCfgPath");
         return loadConfigurations(IgniteUtils.resolveSpringUrl(springCfgPath));
     }
@@ -907,23 +907,7 @@ public class IgnitionEx {
         @Nullable GridSpringResourceContext springCtx, @Nullable ClassLoader ldr) throws IgniteCheckedException {
         A.notNull(springCfgUrl, "springCfgUrl");
 
-        boolean isLog4jUsed = U.gridClassLoader().getResource("org/apache/log4j/Appender.class") != null;
-
-        IgniteBiTuple<Object, Object> t = null;
-
-        if (isLog4jUsed) {
-            try {
-                t = U.addLog4jNoOpLogger();
-            }
-            catch (IgniteCheckedException ignore) {
-                isLog4jUsed = false;
-            }
-        }
-
-        Collection<Handler> savedHnds = null;
-
-        if (!isLog4jUsed)
-            savedHnds = U.addJavaNoOpLogger();
+        Collection<Handler> savedHnds = U.addJavaNoOpLogger();
 
         IgniteBiTuple<Collection<IgniteConfiguration>, ? extends GridSpringResourceContext> cfgMap;
 
@@ -931,11 +915,7 @@ public class IgnitionEx {
             cfgMap = loadConfigurations(springCfgUrl);
         }
         finally {
-            if (isLog4jUsed && t != null)
-                U.removeLog4jNoOpLogger(t);
-
-            if (!isLog4jUsed)
-                U.removeJavaNoOpLogger(savedHnds);
+            U.removeJavaNoOpLogger(savedHnds);
         }
 
         return startConfigurations(cfgMap, springCfgUrl, igniteInstanceName, springCtx, ldr);
@@ -987,23 +967,7 @@ public class IgnitionEx {
         @Nullable GridSpringResourceContext springCtx, @Nullable ClassLoader ldr) throws IgniteCheckedException {
         A.notNull(springCfgStream, "springCfgUrl");
 
-        boolean isLog4jUsed = U.gridClassLoader().getResource("org/apache/log4j/Appender.class") != null;
-
-        IgniteBiTuple<Object, Object> t = null;
-
-        if (isLog4jUsed) {
-            try {
-                t = U.addLog4jNoOpLogger();
-            }
-            catch (IgniteCheckedException ignore) {
-                isLog4jUsed = false;
-            }
-        }
-
-        Collection<Handler> savedHnds = null;
-
-        if (!isLog4jUsed)
-            savedHnds = U.addJavaNoOpLogger();
+        Collection<Handler> savedHnds = U.addJavaNoOpLogger();
 
         IgniteBiTuple<Collection<IgniteConfiguration>, ? extends GridSpringResourceContext> cfgMap;
 
@@ -1011,11 +975,7 @@ public class IgnitionEx {
             cfgMap = loadConfigurations(springCfgStream);
         }
         finally {
-            if (isLog4jUsed && t != null)
-                U.removeLog4jNoOpLogger(t);
-
-            if (!isLog4jUsed)
-                U.removeJavaNoOpLogger(savedHnds);
+            U.removeJavaNoOpLogger(savedHnds);
         }
 
         return startConfigurations(cfgMap, null, igniteInstanceName, springCtx, ldr);
@@ -1592,9 +1552,6 @@ public class IgnitionEx {
         private static final Map<MBeanServer, GridMBeanServerData> mbeans =
             new HashMap<>();
 
-        /** */
-        private static final String[] EMPTY_STR_ARR = new String[0];
-
         /** Grid name. */
         private final String name;
 
@@ -2015,7 +1972,7 @@ public class IgnitionEx {
             myCfg.setMarshaller(marsh);
 
             if (myCfg.getPeerClassLoadingLocalClassPathExclude() == null)
-                myCfg.setPeerClassLoadingLocalClassPathExclude(EMPTY_STR_ARR);
+                myCfg.setPeerClassLoadingLocalClassPathExclude(EMPTY_STRS);
 
             initializeDefaultSpi(myCfg);
 
@@ -2285,7 +2242,7 @@ public class IgnitionEx {
                     Map<UUID, Map<Integer, Set<Integer>>> proposedSuppliers = new HashMap<>();
 
                     for (CacheGroupContext grpCtx : grid.context().cache().cacheGroups()) {
-                        if (grpCtx.isLocal() || grpCtx.systemCache())
+                        if (grpCtx.systemCache())
                             continue;
 
                         if (grpCtx.config().getCacheMode() == PARTITIONED && grpCtx.config().getBackups() == 0) {
@@ -2741,7 +2698,8 @@ public class IgnitionEx {
                     customDfltPlc = true;
 
                     dsCfg.setDefaultDataRegionConfiguration(region);
-                } else
+                }
+                else
                     optionalDataRegions.add(region);
             }
         }
@@ -2760,7 +2718,8 @@ public class IgnitionEx {
                 .setMaxSize(memCfg.getDefaultMemoryPolicySize())
                 .setName(memCfg.getDefaultMemoryPolicyName())
                 .setPersistenceEnabled(persistenceEnabled));
-        } else {
+        }
+        else {
             if (memCfg.getDefaultMemoryPolicySize() != DFLT_MEMORY_POLICY_MAX_SIZE)
                 throw new IgniteCheckedException(new IllegalArgumentException("User-defined MemoryPolicy " +
                     "configuration and defaultMemoryPolicySize properties are set at the same time."));

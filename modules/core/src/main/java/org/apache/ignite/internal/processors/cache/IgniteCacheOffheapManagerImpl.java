@@ -121,7 +121,6 @@ import org.apache.ignite.lang.IgniteBiTuple;
 import org.apache.ignite.lang.IgnitePredicate;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-
 import static java.lang.Boolean.TRUE;
 import static org.apache.ignite.internal.pagemem.PageIdAllocator.FLAG_IDX;
 import static org.apache.ignite.internal.pagemem.PageIdAllocator.INDEX_PARTITION;
@@ -195,9 +194,6 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
 
             try {
                 initDataStructures();
-
-                if (grp.isLocal())
-                    locCacheDataStore = createCacheDataStore(0);
             }
             finally {
                 ctx.database().checkpointReadUnlock();
@@ -320,17 +316,11 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
      * @return Data store.
      */
     @Nullable private CacheDataStore dataStore(GridCacheContext<?, ?> cctx, KeyCacheObject key) {
-        if (grp.isLocal())
-            return locCacheDataStore;
-
         return dataStore(cctx.affinity().partition(key), false);
     }
 
     /** {@inheritDoc} */
     @Override public CacheDataStore dataStore(@Nullable GridDhtLocalPartition part) {
-        if (grp.isLocal())
-            return locCacheDataStore;
-
         assert part != null;
 
         return part.dataStore();
@@ -342,9 +332,6 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
      * @return Related partition cache data store or {@code null} if partition haven't been initialized.
      */
     @Nullable private CacheDataStore dataStore(int partId, boolean includeRenting) {
-        if (grp.isLocal())
-            return locCacheDataStore;
-
         GridDhtLocalPartition part = grp.topology().localPartition(partId, AffinityTopologyVersion.NONE, false, includeRenting);
 
         return part == null ? null : part.dataStore();
@@ -372,21 +359,14 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
         boolean backup,
         AffinityTopologyVersion topVer
     ) throws IgniteCheckedException {
-        if (grp.isLocal())
-            if (primary)
-                return cacheEntriesCount(cacheId, 0);
-            else
-                return 0L;
-        else {
-            long cnt = 0;
+        long cnt = 0;
 
-            Iterator<CacheDataStore> it = cacheData(primary, backup, topVer);
+        Iterator<CacheDataStore> it = cacheData(primary, backup, topVer);
 
-            while (it.hasNext())
-                cnt += it.next().cacheSize(cacheId);
+        while (it.hasNext())
+            cnt += it.next().cacheSize(cacheId);
 
-            return cnt;
-        }
+        return cnt;
     }
 
     /** {@inheritDoc} */
@@ -408,8 +388,7 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
     private Iterable<CacheDataStore> cacheDataStores(
         IgnitePredicate<GridDhtLocalPartition> filter
     ) {
-        return grp.isLocal() ? Collections.singletonList(locCacheDataStore) :
-            F.iterator(grp.topology().currentLocalPartitions(), GridDhtLocalPartition::dataStore, true,
+        return F.iterator(grp.topology().currentLocalPartitions(), GridDhtLocalPartition::dataStore, true,
                 filter, p -> !p.dataStore().destroyed());
     }
 
@@ -421,9 +400,6 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
      */
     private Iterator<CacheDataStore> cacheData(boolean primary, boolean backup, AffinityTopologyVersion topVer) {
         assert primary || backup;
-
-        if (grp.isLocal())
-            return singletonIterator(locCacheDataStore);
 
         IgnitePredicate<GridDhtLocalPartition> filter;
 
@@ -628,7 +604,7 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
         throws IgniteCheckedException {
         KeyCacheObject key = entry.key();
 
-        assert grp.isLocal() || entry.localPartition() != null : entry;
+        assert entry.localPartition() != null : entry;
 
         return dataStore(entry.localPartition()).find(entry.context(), key);
     }
@@ -696,9 +672,7 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
     @Override public void clearCache(GridCacheContext cctx, boolean readers) {
         GridCacheVersion obsoleteVer = null;
 
-        try (GridCloseableIterator<CacheDataRow> it = grp.isLocal() ?
-            iterator(cctx.cacheId(), cacheDataStores().iterator(), null, null) :
-            evictionSafeIterator(cctx.cacheId(), cacheDataStores().iterator())) {
+        try (GridCloseableIterator<CacheDataRow> it = evictionSafeIterator(cctx.cacheId(), cacheDataStores().iterator())) {
             while (it.hasNext()) {
                 cctx.shared().database().checkpointReadLock();
 
@@ -1252,7 +1226,8 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
 
                 try {
                     dataStore.insertRows(batch, initPred);
-                } finally {
+                }
+                finally {
                     ctx.database().checkpointReadUnlock();
                 }
 
@@ -1362,55 +1337,36 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
         IgniteInClosure2X<GridCacheEntryEx, GridCacheVersion> c,
         int amount
     ) throws IgniteCheckedException {
-        long now = U.currentTimeMillis();
-
         GridCacheVersion obsoleteVer = null;
-
-        GridCursor<PendingRow> cur;
 
         cctx.shared().database().checkpointReadLock();
 
         try {
-            if (grp.sharedGroup())
-                cur = pendingEntries.find(new PendingRow(cctx.cacheId()), new PendingRow(cctx.cacheId(), now, 0));
-            else
-                cur = pendingEntries.find(null, new PendingRow(CU.UNDEFINED_CACHE_ID, now, 0));
-
-            if (!cur.next())
-                return 0;
+            int cacheId = grp.sharedGroup() ? cctx.cacheId() : CU.UNDEFINED_CACHE_ID;
 
             if (!busyLock.enterBusy())
                 return 0;
 
             try {
-                int cleared = 0;
+                List<PendingRow> rows = pendingEntries.remove(
+                    new PendingRow(cacheId, Long.MIN_VALUE, 0), new PendingRow(cacheId, U.currentTimeMillis(), 0), amount);
 
-                do {
-                    if (amount != -1 && cleared > amount)
-                        return cleared;
-
-                    PendingRow row = cur.get();
-
+                for (PendingRow row : rows) {
                     if (row.key.partition() == -1)
                         row.key.partition(cctx.affinity().partition(row.key));
 
                     assert row.key != null && row.link != 0 && row.expireTime != 0 : row;
 
-                    if (pendingEntries.removex(row)) {
-                        if (obsoleteVer == null)
-                            obsoleteVer = cctx.cache().nextVersion();
+                    if (obsoleteVer == null)
+                        obsoleteVer = cctx.cache().nextVersion();
 
-                        GridCacheEntryEx entry = cctx.cache().entryEx(row.key);
+                    GridCacheEntryEx entry = cctx.cache().entryEx(row.key);
 
-                        if (entry != null)
-                            c.apply(entry, obsoleteVer);
-                    }
-
-                    cleared++;
+                    if (entry != null)
+                        c.apply(entry, obsoleteVer);
                 }
-                while (cur.next());
 
-                return cleared;
+                return rows.size();
             }
             finally {
                 busyLock.leaveBusy();
@@ -1847,9 +1803,8 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
             GridCacheVersion ver,
             long expireTime,
             MvccVersion mvccVer,
-            MvccVersion newMvccVer)
-            throws IgniteCheckedException
-        {
+            MvccVersion newMvccVer
+        ) throws IgniteCheckedException {
             assert mvccVer != null || newMvccVer == null : newMvccVer;
 
             if (!busyLock.enterBusy())
@@ -2061,7 +2016,7 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
                 if (val != null)
                     val.valueBytes(coCtx);
 
-                 MvccUpdateDataRow updateRow = new MvccUpdateDataRow(
+                MvccUpdateDataRow updateRow = new MvccUpdateDataRow(
                     cctx,
                     key,
                     val,
@@ -2089,9 +2044,9 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
                     || res == ResultType.VERSION_MISMATCH) // cannot update on write conflict
                     return updateRow;
                 else if (res == ResultType.VERSION_FOUND || // exceptional case
-                        res == ResultType.FILTERED || // Operation should be skipped.
-                        (res == ResultType.PREV_NULL && noCreate)  // No op.
-                    ) {
+                    res == ResultType.FILTERED || // Operation should be skipped.
+                    (res == ResultType.PREV_NULL && noCreate)  // No op.
+                ) {
                     // Do nothing, except cleaning up not needed versions
                     cleanup0(cctx, updateRow.cleanupRows());
 
@@ -2454,7 +2409,7 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
          */
         private int cleanup0(GridCacheContext cctx, @Nullable List<MvccLinkAwareSearchRow> cleanupRows)
              throws IgniteCheckedException {
-             if (F.isEmpty(cleanupRows))
+            if (F.isEmpty(cleanupRows))
                  return 0;
 
             int res = 0;
@@ -2689,9 +2644,11 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
          * @param oldRow Old row.
          * @throws IgniteCheckedException If failed.
          */
-        private void updatePendingEntries(GridCacheContext cctx, CacheDataRow newRow, @Nullable CacheDataRow oldRow)
-            throws IgniteCheckedException
-        {
+        private void updatePendingEntries(
+            GridCacheContext cctx,
+            CacheDataRow newRow,
+            @Nullable CacheDataRow oldRow
+        ) throws IgniteCheckedException {
             long expireTime = newRow.expireTime();
 
             int cacheId = grp.sharedGroup() ? cctx.cacheId() : CU.UNDEFINED_CACHE_ID;
@@ -2799,9 +2756,8 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
         /** {@inheritDoc} */
         @Override public List<IgniteBiTuple<Object, MvccVersion>> mvccFindAllVersions(
             GridCacheContext cctx,
-            KeyCacheObject key)
-            throws IgniteCheckedException
-        {
+            KeyCacheObject key
+        ) throws IgniteCheckedException {
             assert grp.mvccEnabled();
 
             // Note: this method is intended for testing only.

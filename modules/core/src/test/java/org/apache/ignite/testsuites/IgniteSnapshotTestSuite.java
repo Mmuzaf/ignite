@@ -22,11 +22,13 @@ import org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteCl
 import org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteClusterSnapshotHandlerTest;
 import org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteClusterSnapshotRestoreSelfTest;
 import org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteClusterSnapshotSelfTest;
+import org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteClusterSnapshotWalRecordTest;
 import org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteSnapshotMXBeanTest;
 import org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteSnapshotManagerSelfTest;
 import org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteSnapshotRemoteRequestTest;
 import org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteSnapshotRestoreFromRemoteTest;
 import org.apache.ignite.internal.processors.cache.persistence.snapshot.IgniteSnapshotWithMetastorageTest;
+import org.apache.ignite.internal.processors.cache.persistence.snapshot.PlainSnapshotTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -41,8 +43,10 @@ import org.junit.runners.Suite;
     IgniteSnapshotMXBeanTest.class,
     IgniteClusterSnapshotRestoreSelfTest.class,
     IgniteClusterSnapshotHandlerTest.class,
+    IgniteSnapshotRestoreFromRemoteTest.class,
+    PlainSnapshotTest.class,
     EncryptedSnapshotTest.class,
-    IgniteSnapshotRestoreFromRemoteTest.class
+    IgniteClusterSnapshotWalRecordTest.class
 })
 public class IgniteSnapshotTestSuite {
 }

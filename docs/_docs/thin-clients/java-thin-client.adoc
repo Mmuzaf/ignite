@@ -86,6 +86,14 @@ The following code sample illustrates how to use the partition awareness feature
 include::{sourceCodeFile}[tag=partition-awareness,indent=0]
 ----
 
+The code sample below shows how to use a custom cache key to partition mapping function to enable affinity awareness on
+a thin client side if the cache already exists in a cluster or/and was created with custom AffinityFunction or AffinityKeyMapper.
+
+[source, java]
+----
+include::{sourceCodeFile}[tag=partition-awareness-with-mapper,indent=0]
+----
+
 If a list of server nodes is dynamically changing or scaling, then it is possible to configure the connection with custom implementation of `ClientAddressFinder`. It should provide a number of current server addresses every time a client asks for them.
 The following code sample illustrates how to use it.
 
@@ -100,7 +108,7 @@ The code snippet shows how an example implementation might look like if you want
 * The `fetchServerAddress()` is a custom function that dynamically provides server addresses.
 * Configure client with `ClientConfiguration.setAddressFinder(finder)`.
 
-Also, you can check a real example of the interface implementation. `ThinClientKubernetesAddressFinder` is created to handle scalable Kubernetes environment.
+Also, you can check a link:https://github.com/apache/ignite/blob/master/examples/src/main/java/org/apache/ignite/examples/client/ClientKubernetesPutGetExample.java#L50[real example] of the interface implementation. `ThinClientKubernetesAddressFinder` is created to handle scalable Kubernetes environment.
 
 == Using Key-Value API
 

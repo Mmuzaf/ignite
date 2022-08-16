@@ -45,6 +45,7 @@ import java.util.stream.IntStream;
 import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.IgniteDataStreamer;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.IgniteLogger;
 import org.apache.ignite.binary.BinaryType;
@@ -73,6 +74,7 @@ import org.apache.ignite.internal.processors.cache.persistence.partstate.GroupPa
 import org.apache.ignite.internal.processors.cache.persistence.wal.crc.FastCrc;
 import org.apache.ignite.internal.processors.marshaller.MappedName;
 import org.apache.ignite.internal.processors.resource.GridSpringResourceContext;
+import org.apache.ignite.internal.util.tostring.GridToStringInclude;
 import org.apache.ignite.internal.util.typedef.G;
 import org.apache.ignite.internal.util.typedef.internal.CU;
 import org.apache.ignite.internal.util.typedef.internal.S;
@@ -246,10 +248,10 @@ public abstract class AbstractSnapshotSelfTest extends GridCommonAbstractTest {
     }
 
     /**
-     * @param ccfg Cache configuration.
+     * @param ccfg Ensures the cache is absent.
      * @throws IgniteCheckedException if failed.
      */
-    protected void ensureCacheAbsent(CacheConfiguration<?, ?> ccfg) throws IgniteCheckedException {
+    protected void ensureCacheAbsent(CacheConfiguration<?, ?> ccfg) throws IgniteCheckedException, InterruptedException {
         String cacheName = ccfg.getName();
 
         for (Ignite ignite : G.allGrids()) {
@@ -285,7 +287,8 @@ public abstract class AbstractSnapshotSelfTest extends GridCommonAbstractTest {
         return ccfg.setCacheMode(CacheMode.PARTITIONED)
             .setBackups(2)
             .setAtomicityMode(CacheAtomicityMode.TRANSACTIONAL)
-            .setAffinity(new RendezvousAffinityFunction(false, CACHE_PARTITIONS_COUNT));
+            .setAffinity(new RendezvousAffinityFunction(false, CACHE_PARTITIONS_COUNT))
+            .setEncryptionEnabled(encryption);
     }
 
     /**
@@ -398,9 +401,11 @@ public abstract class AbstractSnapshotSelfTest extends GridCommonAbstractTest {
         ig.cluster().baselineAutoAdjustEnabled(false);
         ig.cluster().state(ClusterState.ACTIVE);
 
-        for (int i = 0; i < keys; i++) {
-            for (CacheConfiguration<Integer, V> ccfg : ccfgs)
-                ig.getOrCreateCache(ccfg.getName()).put(i, factory.apply(i));
+        for (CacheConfiguration<Integer, V> ccfg : ccfgs) {
+            try (IgniteDataStreamer<Integer, V> ds = ig.dataStreamer(ccfg.getName())) {
+                for (int i = 0; i < keys; i++)
+                    ds.addData(i, factory.apply(i));
+            }
         }
 
         forceCheckpoint();
@@ -558,13 +563,13 @@ public abstract class AbstractSnapshotSelfTest extends GridCommonAbstractTest {
 
         for (Ignite grid : grids) {
             IgniteSnapshotManager mgr = snp((IgniteEx)grid);
-            Function<String, SnapshotSender> old = mgr.localSnapshotSenderFactory();
+            BiFunction<String, String, SnapshotSender> old = mgr.localSnapshotSenderFactory();
 
             BlockingExecutor block = new BlockingExecutor(mgr.snapshotExecutorService());
             execs.add(block);
 
-            mgr.localSnapshotSenderFactory((snpName) ->
-                new DelegateSnapshotSender(log, block, old.apply(snpName)));
+            mgr.localSnapshotSenderFactory((snpName, snpPath) ->
+                new DelegateSnapshotSender(log, block, old.apply(snpName, snpPath)));
         }
 
         return execs;
@@ -774,10 +779,12 @@ public abstract class AbstractSnapshotSelfTest extends GridCommonAbstractTest {
 
         /** User id. */
         @QuerySqlField(index = true)
-        private final int id;
+        @GridToStringInclude
+        protected final int id;
 
         /** Order value. */
         @QuerySqlField
+        @GridToStringInclude
         protected int balance;
 
         /**

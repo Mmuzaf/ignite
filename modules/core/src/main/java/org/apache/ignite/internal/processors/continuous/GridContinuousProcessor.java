@@ -959,9 +959,8 @@ public class GridContinuousProcessor extends GridProcessorAdapter {
         int bufSize,
         long interval,
         boolean autoUnsubscribe,
-        @Nullable IgnitePredicate<ClusterNode> nodeFilter)
-        throws IgniteCheckedException
-    {
+        @Nullable IgnitePredicate<ClusterNode> nodeFilter
+    ) throws IgniteCheckedException {
         hnd = hnd.clone();
 
         String clsName = null;
@@ -1464,7 +1463,7 @@ public class GridContinuousProcessor extends GridProcessorAdapter {
                         if (proc != null) {
                             GridCacheAdapter cache = ctx.cache().internalCache(hnd.cacheName());
 
-                            if (cache != null && !cache.isLocal() && cache.context().userCache())
+                            if (cache != null && cache.context().userCache())
                                 req.addUpdateCounters(ctx.localNodeId(), hnd.updateCounters());
                         }
                     }
@@ -1622,7 +1621,7 @@ public class GridContinuousProcessor extends GridProcessorAdapter {
                             if (proc != null) {
                                 GridCacheAdapter cache = ctx.cache().internalCache(hnd.cacheName());
 
-                                if (cache != null && !cache.isLocal() && cache.context().userCache()) {
+                                if (cache != null && cache.context().userCache()) {
                                     CachePartitionPartialCountersMap cntrsMap =
                                         cache.context().topology().localUpdateCounters(false);
 
@@ -1654,8 +1653,8 @@ public class GridContinuousProcessor extends GridProcessorAdapter {
     private void sendMessageStartResult(final ClusterNode node,
         final UUID routineId,
         byte[] cntrsMapBytes,
-        @Nullable final Exception err)
-    {
+        @Nullable final Exception err
+    ) {
         byte[] errBytes = null;
 
         if (err != null) {
@@ -2110,8 +2109,8 @@ public class GridContinuousProcessor extends GridProcessorAdapter {
             GridContinuousHandler hnd,
             int bufSize,
             long interval,
-            boolean autoUnsubscribe)
-        {
+            boolean autoUnsubscribe
+        ) {
             assert hnd != null;
             assert bufSize > 0;
             assert interval >= 0;
@@ -2496,8 +2495,8 @@ public class GridContinuousProcessor extends GridProcessorAdapter {
             GridContinuousHandler hnd,
             int bufSize,
             long interval,
-            boolean autoUnsubscribe)
-        {
+            boolean autoUnsubscribe
+        ) {
             assert routineId != null;
             assert hnd != null;
             assert bufSize > 0;
@@ -2652,7 +2651,7 @@ public class GridContinuousProcessor extends GridProcessorAdapter {
 
                         GridCacheContext cctx = interCache != null ? interCache.context() : null;
 
-                        if (cctx != null && cntrsPerNode != null && !cctx.isLocal() && cctx.affinityNode())
+                        if (cctx != null && cntrsPerNode != null && cctx.affinityNode())
                             cntrsPerNode.put(ctx.localNodeId(),
                                 toCountersMap(cctx.topology().localUpdateCounters(false)));
 

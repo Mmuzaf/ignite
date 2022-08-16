@@ -171,8 +171,7 @@ public abstract class AbstractPlatformServiceCallTask extends ComputeTaskAdapter
     }
 
     /** */
-    public interface TestPlatformService
-    {
+    public interface TestPlatformService {
         /** */
         @PlatformServiceMethod("get_NodeId")
         UUID getNodeId();
@@ -214,8 +213,12 @@ public abstract class AbstractPlatformServiceCallTask extends ComputeTaskAdapter
         BinarizableTestValue addOne(BinarizableTestValue val);
 
         /** */
-        @PlatformServiceMethod("contextAttribute")
+        @PlatformServiceMethod("ContextAttribute")
         String contextAttribute(String name);
+
+        /** */
+        @PlatformServiceMethod("Intercepted")
+        int intercepted(int val);
     }
 
     /** */

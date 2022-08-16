@@ -781,7 +781,7 @@ public class GridCacheMvccManager extends GridCacheSharedManagerAdapter {
      * @return {@code True} if lock had been removed.
      */
     public boolean isRemoved(GridCacheContext cacheCtx, GridCacheVersion ver) {
-        return !cacheCtx.isNear() && !cacheCtx.isLocal() && ver != null && rmvLocks.contains(ver);
+        return !cacheCtx.isNear() && ver != null && rmvLocks.contains(ver);
     }
 
     /**
@@ -790,7 +790,7 @@ public class GridCacheMvccManager extends GridCacheSharedManagerAdapter {
      * @return {@code True} if added.
      */
     public boolean addRemoved(GridCacheContext cacheCtx, GridCacheVersion ver) {
-        if (cacheCtx.isNear() || cacheCtx.isLocal())
+        if (cacheCtx.isNear())
             return true;
 
         boolean ret = rmvLocks.add(ver);
@@ -1001,8 +1001,8 @@ public class GridCacheMvccManager extends GridCacheSharedManagerAdapter {
      */
     public GridCacheMvccCandidate removeExplicitLock(long threadId,
         IgniteTxKey key,
-        @Nullable GridCacheVersion ver)
-    {
+        @Nullable GridCacheVersion ver
+    ) {
         assert threadId > 0;
 
         GridCacheExplicitLockSpan span = pendingExplicit.get(threadId);

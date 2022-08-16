@@ -17,18 +17,17 @@
 
 package org.apache.ignite.internal.processors.cache.distributed.near.consistency;
 
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
 import org.apache.ignite.IgniteCheckedException;
+import org.apache.ignite.cache.ReadRepairStrategy;
 import org.apache.ignite.internal.processors.affinity.AffinityTopologyVersion;
-import org.apache.ignite.internal.processors.cache.CacheObjectAdapter;
 import org.apache.ignite.internal.processors.cache.EntryGetResult;
 import org.apache.ignite.internal.processors.cache.GridCacheContext;
 import org.apache.ignite.internal.processors.cache.IgniteCacheExpiryPolicy;
 import org.apache.ignite.internal.processors.cache.KeyCacheObject;
-import org.apache.ignite.internal.processors.cache.distributed.dht.GridPartitionedGetFuture;
 import org.apache.ignite.internal.processors.cache.transactions.IgniteInternalTx;
 import org.apache.ignite.transactions.TransactionState;
 
@@ -43,6 +42,7 @@ public class GridNearReadRepairFuture extends GridNearReadRepairAbstractFuture {
      * @param topVer Affinity topology version.
      * @param ctx Cache context.
      * @param keys Keys.
+     * @param strategy Read repair strategy.
      * @param readThrough Read-through flag.
      * @param taskName Task name.
      * @param deserializeBinary Deserialize binary flag.
@@ -54,91 +54,113 @@ public class GridNearReadRepairFuture extends GridNearReadRepairAbstractFuture {
         AffinityTopologyVersion topVer,
         GridCacheContext ctx,
         Collection<KeyCacheObject> keys,
+        ReadRepairStrategy strategy,
         boolean readThrough,
         String taskName,
         boolean deserializeBinary,
         boolean recovery,
         IgniteCacheExpiryPolicy expiryPlc,
         IgniteInternalTx tx) {
-        super(topVer,
+        this(topVer,
             ctx,
             keys,
+            strategy,
             readThrough,
             taskName,
             deserializeBinary,
             recovery,
             expiryPlc,
-            tx);
+            tx,
+            null);
+    }
+
+    /**
+     * @param topVer Affinity topology version.
+     * @param ctx Cache context.
+     * @param keys Keys.
+     * @param strategy Read repair strategy.
+     * @param readThrough Read-through flag.
+     * @param taskName Task name.
+     * @param deserializeBinary Deserialize binary flag.
+     * @param recovery Partition recovery flag.
+     * @param expiryPlc Expiry policy.
+     * @param tx Transaction.
+     * @param remappedFut Remapped future.
+     */
+    private GridNearReadRepairFuture(
+        AffinityTopologyVersion topVer,
+        GridCacheContext ctx,
+        Collection<KeyCacheObject> keys,
+        ReadRepairStrategy strategy,
+        boolean readThrough,
+        String taskName,
+        boolean deserializeBinary,
+        boolean recovery,
+        IgniteCacheExpiryPolicy expiryPlc,
+        IgniteInternalTx tx,
+        GridNearReadRepairFuture remappedFut) {
+        super(topVer,
+            ctx,
+            keys,
+            strategy,
+            readThrough,
+            taskName,
+            deserializeBinary,
+            recovery,
+            expiryPlc,
+            tx,
+            remappedFut);
 
         assert ctx.transactional() : "Atomic cache should not be recovered using this future";
     }
 
     /** {@inheritDoc} */
+    @Override protected GridNearReadRepairAbstractFuture remapFuture(AffinityTopologyVersion topVer) {
+        throw new UnsupportedOperationException("Method should never be called.");
+    }
+
+    /** {@inheritDoc} */
     @Override protected void reduce() {
-        Map<KeyCacheObject, EntryGetResult> newestMap = new HashMap<>(keys.size()); // Newest entries (by version).
-        Map<KeyCacheObject, EntryGetResult> fixedMap = new HashMap<>(); // Newest entries required to be re-committed.
+        assert strategy != null;
 
-        for (GridPartitionedGetFuture<KeyCacheObject, EntryGetResult> fut : futs.values()) {
-            for (KeyCacheObject key : fut.keys()) {
-                EntryGetResult candidateRes = fut.result().get(key);
+        try {
+            check();
 
-                if (!newestMap.containsKey(key)) {
-                    newestMap.put(key, candidateRes);
+            onDone(Collections.emptyMap()); // Everything is fine.
+        }
+        catch (IgniteConsistencyCheckFailedException e) { // Inconsistent entries found.
+            Set<KeyCacheObject> inconsistentKeys = e.keys();
 
-                    continue;
-                }
+            try {
+                Map<KeyCacheObject, EntryGetResult> correctedMap = correct(inconsistentKeys);
 
-                EntryGetResult newestRes = newestMap.get(key);
+                assert !correctedMap.isEmpty(); // Check failed on the same data.
 
-                if (candidateRes != null) {
-                    if (newestRes == null) { // Existing data wins.
-                        newestMap.put(key, candidateRes);
-                        fixedMap.put(key, candidateRes);
-                    }
-                    else {
-                        int compareRes = candidateRes.version().compareTo(newestRes.version());
+                tx.finishFuture().listen(future -> {
+                    TransactionState state = tx.state();
 
-                        if (compareRes > 0) { // Newest data wins.
-                            newestMap.put(key, candidateRes);
-                            fixedMap.put(key, candidateRes);
-                        }
-                        else if (compareRes < 0)
-                            fixedMap.put(key, newestRes);
-                        else if (compareRes == 0) {
-                            CacheObjectAdapter candidateVal = candidateRes.value();
-                            CacheObjectAdapter newestVal = newestRes.value();
+                    if (state == TransactionState.COMMITTED) // Explicit tx may fix the values but become rolled back later.
+                        recordConsistencyViolation(correctedMap.keySet(), correctedMap);
+                });
 
-                            try {
-                                byte[] candidateBytes = candidateVal.valueBytes(ctx.cacheObjectContext());
-                                byte[] newestBytes = newestVal.valueBytes(ctx.cacheObjectContext());
+                onDone(correctedMap);
+            }
+            catch (IgniteConsistencyRepairFailedException rfe) { // Unable to repair all entries.
+                recordConsistencyViolation(inconsistentKeys, /*nothing repaired*/ null);
 
-                                if (!Arrays.equals(candidateBytes, newestBytes))
-                                    fixedMap.put(key, newestRes); // Same version, fixing values inconsistency.
-                            }
-                            catch (IgniteCheckedException e) {
-                                onDone(e);
+                Map<KeyCacheObject, EntryGetResult> correctedMap = rfe.correctedMap();
 
-                                return;
-                            }
-                        }
-                    }
-                }
-                else if (newestRes != null)
-                    fixedMap.put(key, newestRes); // Existing data wins.
+                onDone(new IgniteIrreparableConsistencyViolationException(
+                    correctedMap != null ?
+                        ctx.unwrapBinariesIfNeeded(correctedMap.keySet(), !deserializeBinary) : null,
+                    ctx.unwrapBinariesIfNeeded(rfe.irreparableKeys(), !deserializeBinary)));
+            }
+            catch (IgniteCheckedException ce) {
+                onDone(ce);
             }
         }
-
-        assert !fixedMap.containsValue(null) : "null should never be considered as a fix";
-
-        if (!fixedMap.isEmpty()) {
-            tx.finishFuture().listen(future -> {
-                TransactionState state = tx.state();
-
-                if (state == TransactionState.COMMITTED) // Explicit tx may fix the values but become rolled back later.
-                    recordConsistencyViolation(fixedMap.keySet(), fixedMap);
-            });
+        catch (IgniteCheckedException e) {
+            onDone(e);
         }
-
-        onDone(fixedMap);
     }
 }

@@ -56,6 +56,7 @@ import org.apache.ignite.cache.CacheEntryProcessor;
 import org.apache.ignite.cache.CacheManager;
 import org.apache.ignite.cache.CacheMetrics;
 import org.apache.ignite.cache.CachePeekMode;
+import org.apache.ignite.cache.ReadRepairStrategy;
 import org.apache.ignite.cache.query.AbstractContinuousQuery;
 import org.apache.ignite.cache.query.ContinuousQuery;
 import org.apache.ignite.cache.query.ContinuousQueryWithTransformer;
@@ -369,7 +370,7 @@ public class IgniteCacheProxyImpl<K, V> extends AsyncSupportAdapter<IgniteCache<
     }
 
     /** {@inheritDoc} */
-    @Override public IgniteCache<K, V> withReadRepair() {
+    @Override public IgniteCache<K, V> withReadRepair(ReadRepairStrategy strategy) {
         throw new UnsupportedOperationException();
     }
 
@@ -379,16 +380,10 @@ public class IgniteCacheProxyImpl<K, V> extends AsyncSupportAdapter<IgniteCache<
 
         try {
             if (isAsync()) {
-                if (ctx.cache().isLocal())
-                    setFuture(ctx.cache().localLoadCacheAsync(p, args));
-                else
-                    setFuture(ctx.cache().globalLoadCacheAsync(p, args));
+                setFuture(ctx.cache().globalLoadCacheAsync(p, args));
             }
             else {
-                if (ctx.cache().isLocal())
-                    ctx.cache().localLoadCache(p, args);
-                else
-                    ctx.cache().globalLoadCache(p, args);
+                ctx.cache().globalLoadCache(p, args);
             }
         }
         catch (IgniteCheckedException | IgniteException e) {
@@ -402,15 +397,12 @@ public class IgniteCacheProxyImpl<K, V> extends AsyncSupportAdapter<IgniteCache<
         GridCacheContext<K, V> ctx = getContextSafe();
 
         try {
-            if (ctx.cache().isLocal())
-                return (IgniteFuture<Void>)createFuture(ctx.cache().localLoadCacheAsync(p, args));
-
             return (IgniteFuture<Void>)createFuture(ctx.cache().globalLoadCacheAsync(p, args));
         }
         catch (IgniteCheckedException | IgniteException e) {
             throw cacheException(e);
         }
-   }
+    }
 
     /** {@inheritDoc} */
     @Override public void localLoadCache(@Nullable IgniteBiPredicate<K, V> p, @Nullable Object... args) {
@@ -646,10 +638,7 @@ public class IgniteCacheProxyImpl<K, V> extends AsyncSupportAdapter<IgniteCache<
     private ClusterGroup projection(boolean loc) {
         GridCacheContext<K, V> ctx = getContextSafe();
 
-        if (loc || ctx.isLocal())
-            return ctx.kernalContext().grid().cluster().forLocal();
-
-        return null;
+        return loc ? ctx.kernalContext().grid().cluster().forLocal() : null;
     }
 
     /**
@@ -755,7 +744,8 @@ public class IgniteCacheProxyImpl<K, V> extends AsyncSupportAdapter<IgniteCache<
 
                         try {
                             ctx.kernalContext().continuous().stopRoutine(routineId).get();
-                        } catch (IgniteCheckedException e) {
+                        }
+                        catch (IgniteCheckedException e) {
                             throw U.convertException(e);
                         }
                     }
@@ -768,8 +758,13 @@ public class IgniteCacheProxyImpl<K, V> extends AsyncSupportAdapter<IgniteCache<
                         //noinspection rawtypes
                         return cur instanceof QueryCursorEx ? ((QueryCursorEx)cur).fieldsMeta() : null;
                     }
+
+                    @Override public boolean isQuery() {
+                        return false;
+                    }
                 };
-            } catch (Throwable t) {
+            }
+            catch (Throwable t) {
                 // Initial query failed: stop the routine.
                 ctx.kernalContext().continuous().stopRoutine(routineId).get();
 
@@ -2256,7 +2251,7 @@ public class IgniteCacheProxyImpl<K, V> extends AsyncSupportAdapter<IgniteCache<
      * Throws {@code IgniteCacheRestartingException} if proxy is restarting.
      */
     public void checkRestart() {
-       checkRestart(false);
+        checkRestart(false);
     }
 
     /**

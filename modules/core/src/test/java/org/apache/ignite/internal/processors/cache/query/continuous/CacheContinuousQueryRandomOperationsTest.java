@@ -586,7 +586,7 @@ public class CacheContinuousQueryRandomOperationsTest extends GridCommonAbstract
                             for (CacheEntryEvent<? extends QueryTestKey, ? extends QueryTestValue> e : events)
                                 evts.add(e);
                         }
-                });
+                    });
             }
             else if (qry instanceof ContinuousQueryWithTransformer)
                 initQueryWithTransformer(
@@ -725,7 +725,7 @@ public class CacheContinuousQueryRandomOperationsTest extends GridCommonAbstract
                             for (CacheEntryEvent<? extends QueryTestKey, ? extends QueryTestValue> e : events)
                                 evts.add(e);
                         }
-                });
+                    });
             }
             else if (qry instanceof ContinuousQueryWithTransformer)
                 initQueryWithTransformer(
@@ -1138,6 +1138,8 @@ public class CacheContinuousQueryRandomOperationsTest extends GridCommonAbstract
 
                     evtsQueues.add(evtsQueue);
 
+                    awaitCacheOnClient(ignite(i), ccfg.getName());
+
                     QueryCursor<?> cur = ignite(i).cache(ccfg.getName()).query(qry);
 
                     curs.add(cur);
@@ -1479,7 +1481,8 @@ public class CacheContinuousQueryRandomOperationsTest extends GridCommonAbstract
                 default:
                     fail("Op:" + op);
             }
-        } finally {
+        }
+        finally {
             if (tx != null)
                 tx.close();
         }

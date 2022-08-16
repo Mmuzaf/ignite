@@ -143,14 +143,14 @@ public class TxLog implements CheckpointListener {
                             if (PageHandler.isWalDeltaRecordNeeded(pageMemory, TX_LOG_CACHE_ID, metaId, metaPage, wal, null))
                                 assert io.getType() == PageIO.T_META;
 
-                                wal.log(new MetaPageInitRecord(
-                                    TX_LOG_CACHE_ID,
-                                    metaId,
-                                    io.getType(),
-                                    io.getVersion(),
-                                    treeRoot,
-                                    reuseListRoot
-                                ));
+                            wal.log(new MetaPageInitRecord(
+                                TX_LOG_CACHE_ID,
+                                metaId,
+                                io.getType(),
+                                io.getVersion(),
+                                treeRoot,
+                                reuseListRoot
+                            ));
 
                             isNew = true;
                         }
@@ -300,7 +300,8 @@ public class TxLog implements CheckpointListener {
             synchronized (sync) {
                 tree.invoke(key, null, new TxLogUpdateClosure(key.major(), key.minor(), state, primary));
             }
-        } finally {
+        }
+        finally {
             evict(key, sync);
         }
     }

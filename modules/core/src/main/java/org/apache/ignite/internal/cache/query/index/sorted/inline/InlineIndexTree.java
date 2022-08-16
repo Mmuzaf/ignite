@@ -39,11 +39,9 @@ import org.apache.ignite.internal.cache.query.index.sorted.inline.io.AbstractInl
 import org.apache.ignite.internal.cache.query.index.sorted.inline.io.AbstractInlineLeafIO;
 import org.apache.ignite.internal.cache.query.index.sorted.inline.io.MvccIO;
 import org.apache.ignite.internal.metric.IoStatisticsHolder;
-import org.apache.ignite.internal.pagemem.FullPageId;
 import org.apache.ignite.internal.pagemem.PageIdAllocator;
 import org.apache.ignite.internal.pagemem.PageIdUtils;
 import org.apache.ignite.internal.pagemem.PageMemory;
-import org.apache.ignite.internal.pagemem.wal.record.PageSnapshot;
 import org.apache.ignite.internal.processors.cache.CacheGroupContext;
 import org.apache.ignite.internal.processors.cache.IgniteCacheOffheapManager;
 import org.apache.ignite.internal.processors.cache.mvcc.MvccUtils;
@@ -57,12 +55,16 @@ import org.apache.ignite.internal.processors.cache.persistence.tree.io.PageIoRes
 import org.apache.ignite.internal.processors.cache.persistence.tree.reuse.ReuseList;
 import org.apache.ignite.internal.processors.cache.tree.mvcc.data.MvccDataRow;
 import org.apache.ignite.internal.util.typedef.F;
+import org.apache.ignite.internal.util.typedef.internal.CU;
 import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
+import org.apache.ignite.maintenance.MaintenanceTask;
 import org.jetbrains.annotations.Nullable;
 
 import static org.apache.ignite.internal.cache.query.index.sorted.inline.types.NullableInlineIndexKeyType.CANT_BE_COMPARE;
 import static org.apache.ignite.internal.cache.query.index.sorted.inline.types.NullableInlineIndexKeyType.COMPARE_UNSUPPORTED;
+import static org.apache.ignite.internal.cache.query.index.sorted.maintenance.MaintenanceRebuildIndexUtils.mergeTasks;
+import static org.apache.ignite.internal.cache.query.index.sorted.maintenance.MaintenanceRebuildIndexUtils.toMaintenanceTask;
 
 /**
  * BPlusTree where nodes stores inlined index keys.
@@ -159,9 +161,6 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
             // Page is ready - read meta information.
             MetaPageInfo metaInfo = metaInfo();
 
-            if (def != null)
-                def.initByMeta(initNew, metaInfo);
-
             inlineSize = metaInfo.inlineSize();
             setIos(inlineSize, mvccEnabled);
 
@@ -175,15 +174,18 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
 
             if (!metaInfo.flagsSupported())
                 upgradeMetaPage(inlineObjSupported);
-
-        } else {
-            def.initByMeta(initNew, null);
-
+        }
+        else {
             rowHnd = rowHndFactory.create(def, keyTypeSettings);
 
             inlineSize = computeInlineSize(
-                rowHnd.inlineIndexKeyTypes(), rowHnd.indexKeyDefinitions(),
-                configuredInlineSize, maxInlineSize);
+                def.idxName().fullName(),
+                rowHnd.inlineIndexKeyTypes(),
+                rowHnd.indexKeyDefinitions(),
+                configuredInlineSize,
+                maxInlineSize,
+                log
+            );
 
             setIos(inlineSize, mvccEnabled);
         }
@@ -233,7 +235,8 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
 
                         return inlineObjDetector.inlineObjectSupported();
 
-                    } finally {
+                    }
+                    finally {
                         ThreadLocalRowHandlerHolder.clearRowHandler();
                     }
                 }
@@ -298,7 +301,8 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
 
                     return applySortOrder(cmp, keyDef.order().sortOrder());
                 }
-            } catch (Exception e) {
+            }
+            catch (Exception e) {
                 throw new IgniteException("Failed to store new index row.", e);
             }
         }
@@ -410,17 +414,21 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
     }
 
     /**
+     * @param name Index name.
      * @param keyTypes Index key types.
      * @param keyDefs Index key definitions.
      * @param cfgInlineSize Inline size from index config.
      * @param maxInlineSize Max inline size from cache config.
+     * @param log Logger.
      * @return Inline size.
      */
     public static int computeInlineSize(
+        String name,
         List<InlineIndexKeyType> keyTypes,
         List<IndexKeyDefinition> keyDefs,
         int cfgInlineSize,
-        int maxInlineSize
+        int maxInlineSize,
+        IgniteLogger log
     ) {
         if (cfgInlineSize == 0)
             return 0;
@@ -428,8 +436,7 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
         if (F.isEmpty(keyTypes))
             return 0;
 
-        if (cfgInlineSize != -1)
-            return Math.min(PageIO.MAX_PAYLOAD_SIZE, cfgInlineSize);
+        boolean fixedSize = true;
 
         int propSize = maxInlineSize == -1
             ? IgniteSystemProperties.getInteger(IgniteSystemProperties.IGNITE_MAX_INDEX_PAYLOAD_SIZE, IGNITE_MAX_INDEX_PAYLOAD_SIZE_DEFAULT)
@@ -439,6 +446,8 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
 
         for (int i = 0; i < keyTypes.size(); i++) {
             InlineIndexKeyType keyType = keyTypes.get(i);
+
+            fixedSize &= keyType.keySize() != -1;
 
             int sizeInc = keyType.inlineSize();
 
@@ -458,6 +467,20 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
                 size = propSize;
                 break;
             }
+        }
+
+        if (cfgInlineSize != -1) {
+            cfgInlineSize = Math.min(PageIO.MAX_PAYLOAD_SIZE, cfgInlineSize);
+
+            if (fixedSize && size < cfgInlineSize) {
+                log.warning("Explicit INLINE_SIZE for fixed size index item is too big. " +
+                    "This will lead to wasting of space inside index pages. Ignoring " +
+                    "[index=" + name + ", explicitInlineSize=" + cfgInlineSize + ", realInlineSize=" + size + ']');
+
+                return size;
+            }
+
+            return cfgInlineSize;
         }
 
         return Math.min(PageIO.MAX_PAYLOAD_SIZE, size);
@@ -480,26 +503,7 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
      * @throws IgniteCheckedException If failed.
      */
     public MetaPageInfo metaInfo() throws IgniteCheckedException {
-        final long metaPage = acquirePage(metaPageId);
-
-        try {
-            long pageAddr = readLock(metaPageId, metaPage); // Meta can't be removed.
-
-            assert pageAddr != 0 : "Failed to read lock meta page [metaPageId=" +
-                U.hexLong(metaPageId) + ']';
-
-            try {
-                BPlusMetaIO io = BPlusMetaIO.VERSIONS.forPage(pageAddr);
-
-                return new MetaPageInfo(io, pageAddr);
-            }
-            finally {
-                readUnlock(metaPageId, metaPage, pageAddr);
-            }
-        }
-        finally {
-            releasePage(metaPageId, metaPage);
-        }
+        return MetaPageInfo.read(metaPageId, grpId, pageMem);
     }
 
     /**
@@ -515,18 +519,13 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
         try {
             long pageAddr = writeLock(metaPageId, metaPage); // Meta can't be removed.
 
-            assert pageAddr != 0 : "Failed to read lock meta page [metaPageId=" +
-                U.hexLong(metaPageId) + ']';
+            assert pageAddr != 0 : "Failed to write lock meta page [metaPageId=" + U.hexLong(metaPageId) + ']';
 
             try {
                 BPlusMetaIO.upgradePageVersion(pageAddr, inlineObjSupported, false, pageSize());
-
-                if (wal != null)
-                    wal.log(new PageSnapshot(new FullPageId(metaPageId, grpId),
-                        pageAddr, pageMem.pageSize(), pageMem.realPageSize(grpId)));
             }
             finally {
-                writeUnlock(metaPageId, metaPage, pageAddr, true);
+                writeUnlock(metaPageId, metaPage, pageAddr, Boolean.TRUE, true);
             }
         }
         finally {
@@ -540,30 +539,7 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
      * @throws IgniteCheckedException If failed.
      */
     public void copyMetaInfo(MetaPageInfo info) throws IgniteCheckedException {
-        final long metaPage = acquirePage(metaPageId);
-
-        try {
-            long pageAddr = writeLock(metaPageId, metaPage); // Meta can't be removed.
-
-            assert pageAddr != 0 : "Failed to read lock meta page [metaPageId=" +
-                U.hexLong(metaPageId) + ']';
-
-            try {
-                BPlusMetaIO.setValues(
-                    pageAddr,
-                    info.inlineSize(),
-                    info.useUnwrappedPk(),
-                    info.inlineObjectSupported(),
-                    info.inlineObjectHash()
-                );
-            }
-            finally {
-                writeUnlock(metaPageId, metaPage, pageAddr, true);
-            }
-        }
-        finally {
-            releasePage(metaPageId, metaPage);
-        }
+        info.write(metaPageId, grpId, pageMem);
     }
 
     /** */
@@ -581,8 +557,34 @@ public class InlineIndexTree extends BPlusTree<IndexRow, IndexRow> {
      * @return New CorruptedTreeException instance.
      */
     @Override protected CorruptedTreeException corruptedTreeException(String msg, Throwable cause, int grpId, long... pageIds) {
-        CorruptedTreeException e = new CorruptedTreeException(msg, cause, grpName, def.idxName().cacheName(),
-            def.idxName().idxName(), grpId, pageIds);
+        IndexName idx = def.idxName();
+
+        String indexName = idx.idxName();
+        String cacheName = idx.cacheName();
+        String tableName = idx.tableName();
+
+        CorruptedTreeException e = new CorruptedTreeException(msg, cause, grpName, cacheName,
+            indexName, grpId, pageIds);
+
+        String errorMsg = "Index " + idx + " of the table " + tableName + " (cache " + cacheName + ") is " +
+            "corrupted, to fix this issue a rebuild is required. On the next restart, node will enter the " +
+            "maintenance mode and rebuild corrupted indexes.";
+
+        log.warning(errorMsg);
+
+        int cacheId = CU.cacheId(cacheName);
+
+        try {
+            MaintenanceTask task = toMaintenanceTask(cacheId, indexName);
+
+            grpCtx.shared().kernalContext().maintenanceRegistry().registerMaintenanceTask(
+                task,
+                oldTask -> mergeTasks(oldTask, task)
+            );
+        }
+        catch (IgniteCheckedException ex) {
+            log.warning("Failed to register maintenance record for corrupted partition files.", ex);
+        }
 
         processFailure(FailureType.CRITICAL_ERROR, e);
 

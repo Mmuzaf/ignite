@@ -37,7 +37,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-
+import java.util.TreeSet;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.cache.QueryEntity;
 import org.apache.ignite.cache.QueryIndex;
@@ -413,7 +413,7 @@ public class JdbcThinMetadataSelfTest extends JdbcThinAbstractSelfTest {
     public void testGetAllView() throws Exception {
         testGetTables(
             new String[] {"VIEW"},
-            new HashSet<>(Arrays.asList(
+            new TreeSet<>(Arrays.asList(
                 "SYS.METRICS",
                 "SYS.SERVICES",
                 "SYS.CACHE_GROUPS",
@@ -455,6 +455,7 @@ public class JdbcThinMetadataSelfTest extends JdbcThinAbstractSelfTest {
                 "SYS.DS_SEMAPHORES",
                 "SYS.DS_REENTRANTLOCKS",
                 "SYS.STATISTICS_LOCAL_DATA",
+                "SYS.STATISTICS_GLOBAL_DATA",
                 "SYS.STATISTICS_PARTITION_DATA",
                 "SYS.STATISTICS_CONFIGURATION"
             ))
@@ -470,7 +471,7 @@ public class JdbcThinMetadataSelfTest extends JdbcThinAbstractSelfTest {
 
             ResultSet rs = meta.getTables(null, null, null, tblTypes);
 
-            Set<String> actualTbls = new HashSet<>(expTbls.size());
+            Set<String> actualTbls = new TreeSet<>();
 
             while (rs.next()) {
                 actualTbls.add(rs.getString("TABLE_SCHEM") + '.'
@@ -519,13 +520,15 @@ public class JdbcThinMetadataSelfTest extends JdbcThinAbstractSelfTest {
                     assert rs.getInt("NULLABLE") == 0;
                     assert rs.getInt(11) == 0; // nullable column by index
                     assert rs.getString("IS_NULLABLE").equals("NO");
-                } else if ("ORGID".equals(name)) {
+                }
+                else if ("ORGID".equals(name)) {
                     assert rs.getInt("DATA_TYPE") == INTEGER;
                     assert "INTEGER".equals(rs.getString("TYPE_NAME"));
                     assert rs.getInt("NULLABLE") == 1;
                     assert rs.getInt(11) == 1;  // nullable column by index
                     assert rs.getString("IS_NULLABLE").equals("YES");
-                } else if ("AGE".equals(name)) {
+                }
+                else if ("AGE".equals(name)) {
                     assert rs.getInt("DATA_TYPE") == INTEGER;
                     assert "INTEGER".equals(rs.getString("TYPE_NAME"));
                     assert rs.getInt("NULLABLE") == 0;
@@ -571,7 +574,8 @@ public class JdbcThinMetadataSelfTest extends JdbcThinAbstractSelfTest {
                     assert rs.getInt("DATA_TYPE") == INTEGER;
                     assert "INTEGER".equals(rs.getString("TYPE_NAME"));
                     assert rs.getInt("NULLABLE") == 0;
-                } else if ("name".equals(name)) {
+                }
+                else if ("name".equals(name)) {
                     assert rs.getInt("DATA_TYPE") == VARCHAR;
                     assert "VARCHAR".equals(rs.getString("TYPE_NAME"));
                     assert rs.getInt("NULLABLE") == 1;
@@ -605,7 +609,7 @@ public class JdbcThinMetadataSelfTest extends JdbcThinAbstractSelfTest {
 
             ResultSet rs = meta.getColumns(null, null, null, null);
 
-            Set<String> expectedCols = new HashSet<>(Arrays.asList(
+            Set<String> expectedCols = new TreeSet<>(Arrays.asList(
                 "PUBLIC.Quoted.Id.null",
                 "PUBLIC.Quoted.Name.null.50",
                 "PUBLIC.TEST.ID.null",
@@ -654,7 +658,7 @@ public class JdbcThinMetadataSelfTest extends JdbcThinAbstractSelfTest {
 
             Assert.assertEquals(expectedCols, actualUserCols);
 
-            expectedCols = new HashSet<>(Arrays.asList(
+            expectedCols = new TreeSet<>(Arrays.asList(
                 "SYS.BASELINE_NODES.CONSISTENT_ID.null.2147483647",
                 "SYS.BASELINE_NODES.ONLINE.null.1",
                 "SYS.BASELINE_NODE_ATTRIBUTES.NODE_CONSISTENT_ID.null.2147483647",
@@ -692,6 +696,7 @@ public class JdbcThinMetadataSelfTest extends JdbcThinAbstractSelfTest {
                 "SYS.CACHES.REBALANCE_ORDER.null.10",
                 "SYS.CACHES.EVICTION_FILTER.null.2147483647",
                 "SYS.CACHES.EVICTION_POLICY_FACTORY.null.2147483647",
+                "SYS.CACHES.CONFLICT_RESOLVER.null.2147483647",
                 "SYS.CACHES.IS_NEAR_CACHE_ENABLED.null.1",
                 "SYS.CACHES.NEAR_CACHE_EVICTION_POLICY_FACTORY.null.2147483647",
                 "SYS.CACHES.NEAR_CACHE_START_SIZE.null.10",
@@ -769,6 +774,7 @@ public class JdbcThinMetadataSelfTest extends JdbcThinAbstractSelfTest {
                 "SYS.SQL_QUERIES.DURATION.null.19",
                 "SYS.SQL_QUERIES.ORIGIN_NODE_ID.null.2147483647",
                 "SYS.SQL_QUERIES.INITIATOR_ID.null.2147483647",
+                "SYS.SQL_QUERIES.SUBJECT_ID.null.2147483647",
                 "SYS.SCAN_QUERIES.START_TIME.null.19",
                 "SYS.SCAN_QUERIES.TRANSFORMER.null.2147483647",
                 "SYS.SCAN_QUERIES.LOCAL.null.1",
@@ -1115,7 +1121,18 @@ public class JdbcThinMetadataSelfTest extends JdbcThinAbstractSelfTest {
                 "SYS.STATISTICS_LOCAL_DATA.TYPE.null.2147483647",
                 "SYS.STATISTICS_PARTITION_DATA.NULLS.null.19",
                 "SYS.STATISTICS_PARTITION_DATA.COLUMN.null.2147483647",
-                "SYS.STATISTICS_LOCAL_DATA.SCHEMA.null.2147483647"
+                "SYS.STATISTICS_LOCAL_DATA.SCHEMA.null.2147483647",
+                "SYS.STATISTICS_GLOBAL_DATA.SCHEMA.null.2147483647",
+                "SYS.STATISTICS_GLOBAL_DATA.TYPE.null.2147483647",
+                "SYS.STATISTICS_GLOBAL_DATA.NAME.null.2147483647",
+                "SYS.STATISTICS_GLOBAL_DATA.COLUMN.null.2147483647",
+                "SYS.STATISTICS_GLOBAL_DATA.ROWS_COUNT.null.19",
+                "SYS.STATISTICS_GLOBAL_DATA.DISTINCT.null.19",
+                "SYS.STATISTICS_GLOBAL_DATA.NULLS.null.19",
+                "SYS.STATISTICS_GLOBAL_DATA.TOTAL.null.19",
+                "SYS.STATISTICS_GLOBAL_DATA.SIZE.null.10",
+                "SYS.STATISTICS_GLOBAL_DATA.VERSION.null.19",
+                "SYS.STATISTICS_GLOBAL_DATA.LAST_UPDATE_TIME.null.2147483647"
                 ));
 
             Assert.assertEquals(expectedCols, actualSystemCols);

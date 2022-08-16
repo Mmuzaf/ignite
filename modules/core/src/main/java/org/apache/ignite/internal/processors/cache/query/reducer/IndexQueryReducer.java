@@ -28,6 +28,7 @@ import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.internal.cache.query.index.IndexQueryResultMeta;
 import org.apache.ignite.internal.cache.query.index.sorted.IndexKeyDefinition;
+import org.apache.ignite.internal.cache.query.index.sorted.IndexKeyType;
 import org.apache.ignite.internal.cache.query.index.sorted.IndexRowComparator;
 import org.apache.ignite.internal.cache.query.index.sorted.IndexRowCompartorImpl;
 import org.apache.ignite.internal.cache.query.index.sorted.keys.IndexKey;
@@ -131,19 +132,37 @@ public class IndexQueryReducer<R> extends MergeSortCacheQueryReducer<R> {
 
                 return 0;
 
-            } catch (IgniteCheckedException e) {
+            }
+            catch (IgniteCheckedException e) {
                 throw new IgniteException("Failed to sort remote index rows", e);
             }
         }
 
         /** */
-        private IndexKey key(String key, int type, IgniteBiTuple<?, ?> entry) throws IgniteCheckedException {
-            GridQueryProperty prop = typeDesc.property(key);
+        private IndexKey key(String key, IndexKeyType type, IgniteBiTuple<?, ?> entry) throws IgniteCheckedException {
+            Object o;
 
-            // PrimaryKey field.
-            Object o = prop == null ? entry.getKey() : prop.value(entry.getKey(), entry.getValue());
+            if (isKeyField(key))
+                o = entry.getKey();
+            else if (isValueField(key))
+                o = entry.getValue();
+            else {
+                GridQueryProperty prop = typeDesc.property(key);
+
+                o = prop.value(entry.getKey(), entry.getValue());
+            }
 
             return IndexKeyFactory.wrap(o, type, cctx.cacheObjectContext(), meta.keyTypeSettings());
+        }
+
+        /** */
+        private boolean isKeyField(String fld) {
+            return fld.equals(typeDesc.keyFieldAlias()) || fld.equals(QueryUtils.KEY_FIELD_NAME);
+        }
+
+        /** */
+        private boolean isValueField(String fld) {
+            return fld.equals(typeDesc.valueFieldAlias()) || fld.equals(QueryUtils.VAL_FIELD_NAME);
         }
     }
 }

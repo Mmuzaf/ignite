@@ -17,17 +17,21 @@
 
 package org.apache.ignite.internal.cache.query.index.sorted.inline;
 
+import java.util.Comparator;
+import java.util.PriorityQueue;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.failure.FailureContext;
 import org.apache.ignite.internal.cache.query.index.AbstractIndex;
-import org.apache.ignite.internal.cache.query.index.Index;
 import org.apache.ignite.internal.cache.query.index.SingleCursor;
+import org.apache.ignite.internal.cache.query.index.SortOrder;
 import org.apache.ignite.internal.cache.query.index.sorted.DurableBackgroundCleanupIndexTreeTaskV2;
+import org.apache.ignite.internal.cache.query.index.sorted.IndexKeyDefinition;
 import org.apache.ignite.internal.cache.query.index.sorted.IndexKeyTypeSettings;
 import org.apache.ignite.internal.cache.query.index.sorted.IndexRow;
+import org.apache.ignite.internal.cache.query.index.sorted.IndexRowComparator;
 import org.apache.ignite.internal.cache.query.index.sorted.IndexRowImpl;
 import org.apache.ignite.internal.cache.query.index.sorted.IndexValueCursor;
 import org.apache.ignite.internal.cache.query.index.sorted.InlineIndexRowHandler;
@@ -37,7 +41,6 @@ import org.apache.ignite.internal.metric.IoStatisticsHolderIndex;
 import org.apache.ignite.internal.processors.cache.GridCacheContext;
 import org.apache.ignite.internal.processors.cache.mvcc.MvccSnapshot;
 import org.apache.ignite.internal.processors.cache.persistence.CacheDataRow;
-import org.apache.ignite.internal.processors.cache.persistence.metastorage.pendingtask.DurableBackgroundTask;
 import org.apache.ignite.internal.util.lang.GridCursor;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.spi.indexing.IndexingQueryCacheFilter;
@@ -104,6 +107,27 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
         }
 
         return segments[segment].find(lower, upper, lowIncl, upIncl, closure, null);
+    }
+
+    /** {@inheritDoc} */
+    @Override public GridCursor<IndexRow> find(
+        IndexRow lower,
+        IndexRow upper,
+        boolean lowIncl,
+        boolean upIncl,
+        IndexQueryContext qryCtx
+    ) throws IgniteCheckedException {
+        int segmentsCnt = segmentsCount();
+
+        if (segmentsCnt == 1)
+            return find(lower, upper, lowIncl, upIncl, 0, qryCtx);
+
+        final GridCursor<IndexRow>[] segmentCursors = new GridCursor[segmentsCnt];
+
+        for (int i = 0; i < segmentsCnt; i++)
+            segmentCursors[i] = find(lower, upper, lowIncl, upIncl, i, qryCtx);
+
+        return new SegmentedIndexCursor(segmentCursors, def);
     }
 
     /** {@inheritDoc} */
@@ -251,7 +275,8 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
             if (!replaced && oldRow != null)
                 remove(oldRow);
 
-        } finally {
+        }
+        finally {
             ThreadLocalRowHandlerHolder.clearRowHandler();
         }
     }
@@ -271,7 +296,8 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
 
             return replaced;
 
-        } catch (Throwable t) {
+        }
+        catch (Throwable t) {
             cctx.kernalContext().failure().process(new FailureContext(CRITICAL_ERROR, t));
 
             throw t;
@@ -289,7 +315,8 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
 
             segments[segment].removex(idxRow);
 
-        } catch (Throwable t) {
+        }
+        catch (Throwable t) {
             cctx.kernalContext().failure().process(new FailureContext(CRITICAL_ERROR, t));
 
             throw t;
@@ -312,19 +339,6 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
         finally {
             ThreadLocalRowHandlerHolder.clearRowHandler();
         }
-    }
-
-    /** {@inheritDoc} */
-    @Override public <T extends Index> T unwrap(Class<T> clazz) {
-        if (clazz == null)
-            return null;
-
-        if (clazz.isAssignableFrom(getClass()))
-            return clazz.cast(this);
-
-        throw new IllegalArgumentException(
-            String.format("Cannot unwrap [%s] to [%s]", getClass().getName(), clazz.getName())
-        );
     }
 
     /** {@inheritDoc} */
@@ -419,6 +433,23 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
 
     /** {@inheritDoc} */
     @Override public void destroy(boolean softDel) {
+        try {
+            destroy0(softDel, false);
+        }
+        catch (IgniteCheckedException e) {
+            // Should NEVER happen because renameImmediately is false here, but just in case:
+            throw new IgniteException(e);
+        }
+    }
+
+    /**
+     * Destroys the index and if {@code renameImmediately} is {@code true} renames index trees.
+     *
+     * @param softDel If {@code true} then perform logical deletion.
+     * @param renameImmediately If {@code true} then rename index trees immediately.
+     * @throws IgniteCheckedException If failed to rename index trees.
+     */
+    public void destroy0(boolean softDel, boolean renameImmediately) throws IgniteCheckedException {
         // Already destroyed.
         if (!destroyed.compareAndSet(false, true))
             return;
@@ -435,7 +466,7 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
             if (cctx.group().persistenceEnabled() ||
                 cctx.shared().kernalContext().state().clusterState().state() != INACTIVE) {
                 // Actual destroy index task.
-                DurableBackgroundTask<Long> task = new DurableBackgroundCleanupIndexTreeTaskV2(
+                DurableBackgroundCleanupIndexTreeTaskV2 task = new DurableBackgroundCleanupIndexTreeTaskV2(
                     cctx.group().name(),
                     cctx.name(),
                     def.idxName().idxName(),
@@ -444,6 +475,10 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
                     segments.length,
                     segments
                 );
+
+                if (renameImmediately) {
+                    task.renameIndexTrees(cctx.group());
+                }
 
                 cctx.kernalContext().durableBackgroundTask().executeAsync(task, cctx.config());
             }
@@ -454,5 +489,82 @@ public class InlineIndexImpl extends AbstractIndex implements InlineIndex {
     @Override public boolean canHandle(CacheDataRow row) throws IgniteCheckedException {
         return cctx.kernalContext().query().belongsToTable(
             cctx, def.idxName().cacheName(), def.idxName().tableName(), row.key(), row.value());
+    }
+
+    /**
+     * @return Index definition.
+     */
+    public SortedIndexDefinition indexDefinition() {
+        return def;
+    }
+
+    /** Single cursor over multiple segments. The next value is chosen with the index row comparator. */
+    private static class SegmentedIndexCursor implements GridCursor<IndexRow> {
+        /** Cursors over segments. */
+        private final PriorityQueue<GridCursor<IndexRow>> cursors;
+
+        /** Comparator to compare index rows. */
+        private final Comparator<GridCursor<IndexRow>> cursorComp;
+
+        /** */
+        private IndexRow head;
+
+        /** */
+        SegmentedIndexCursor(GridCursor<IndexRow>[] cursors, SortedIndexDefinition idxDef) throws IgniteCheckedException {
+            cursorComp = new Comparator<GridCursor<IndexRow>>() {
+                private final IndexRowComparator rowComparator = idxDef.rowComparator();
+
+                private final IndexKeyDefinition[] keyDefs =
+                    idxDef.indexKeyDefinitions().values().toArray(new IndexKeyDefinition[0]);
+
+                @Override public int compare(GridCursor<IndexRow> o1, GridCursor<IndexRow> o2) {
+                    try {
+                        int keysLen = o1.get().keys().length;
+
+                        for (int i = 0; i < keysLen; i++) {
+                            int cmp = rowComparator.compareRow(o1.get(), o2.get(), i);
+
+                            if (cmp != 0) {
+                                boolean desc = keyDefs[i].order().sortOrder() == SortOrder.DESC;
+
+                                return desc ? -cmp : cmp;
+                            }
+                        }
+
+                        return 0;
+                    }
+                    catch (IgniteCheckedException e) {
+                        throw new IgniteException("Failed to sort remote index rows", e);
+                    }
+                }
+            };
+
+            this.cursors = new PriorityQueue<>(cursors.length, cursorComp);
+
+            for (GridCursor<IndexRow> c: cursors) {
+                if (c.next())
+                    this.cursors.add(c);
+            }
+        }
+
+        /** {@inheritDoc} */
+        @Override public boolean next() throws IgniteCheckedException {
+            if (cursors.isEmpty())
+                return false;
+
+            GridCursor<IndexRow> c = cursors.poll();
+
+            head = c.get();
+
+            if (c.next())
+                cursors.add(c);
+
+            return true;
+        }
+
+        /** {@inheritDoc} */
+        @Override public IndexRow get() throws IgniteCheckedException {
+            return head;
+        }
     }
 }

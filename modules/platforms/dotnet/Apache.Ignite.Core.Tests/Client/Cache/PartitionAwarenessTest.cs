@@ -27,6 +27,7 @@ namespace Apache.Ignite.Core.Tests.Client.Cache
     using Apache.Ignite.Core.Cache.Configuration;
     using Apache.Ignite.Core.Client;
     using Apache.Ignite.Core.Client.Cache;
+    using Apache.Ignite.Core.Client.DataStructures;
     using Apache.Ignite.Core.Common;
     using NUnit.Framework;
 
@@ -460,6 +461,97 @@ namespace Apache.Ignite.Core.Tests.Client.Cache
             }
 
             Assert.AreEqual(gridIdx, GetClientRequestGridIndex("Start", RequestNamePrefixStreamer));
+        }
+
+        [Test]
+        [TestCase("default-grp-partitioned", null, CacheMode.Partitioned, 0)]
+        [TestCase("default-grp-replicated", null, CacheMode.Replicated, 2)]
+        [TestCase("custom-grp-partitioned", "testAtomicLong", CacheMode.Partitioned, 1)]
+        [TestCase("custom-grp-replicated", "testAtomicLong", CacheMode.Replicated, 0)]
+        public void AtomicLong_RequestIsRoutedToPrimaryNode(
+            string name, string groupName, CacheMode cacheMode, int gridIdx)
+        {
+            var cfg = new AtomicClientConfiguration
+            {
+                GroupName = groupName,
+                CacheMode = cacheMode
+            };
+
+            var atomicLong = Client.GetAtomicLong(name, cfg, 1, true);
+
+            // Warm up.
+            atomicLong.Read();
+            ClearLoggers();
+
+            // Test.
+            atomicLong.Read();
+
+            Assert.AreEqual(gridIdx, GetClientRequestGridIndex("ValueGet", "datastructures.ClientAtomicLong"));
+        }
+
+        [Test]
+        [TestCase("default-grp-partitioned-set", null, CacheMode.Partitioned, 1, 1)]
+        [TestCase("default-grp-partitioned-set", null, CacheMode.Partitioned, 2, 0)]
+        [TestCase("default-grp-partitioned-set", null, CacheMode.Partitioned, 3, 0)]
+        [TestCase("default-grp-partitioned-set", null, CacheMode.Partitioned, 4, 1)]
+        [TestCase("custom-grp-partitioned-set", "testIgniteSet1", CacheMode.Partitioned, 1, 1)]
+        [TestCase("custom-grp-partitioned-set", "testIgniteSet1", CacheMode.Partitioned, 3, 0)]
+        [TestCase("custom-grp-replicated-set", "testIgniteSet2", CacheMode.Replicated, 1, 1)]
+        [TestCase("custom-grp-replicated-set", "testIgniteSet2", CacheMode.Replicated, 3, 1)]
+        public void IgniteSet_RequestIsRoutedToPrimaryNode(
+            string name, string groupName, CacheMode cacheMode, int item, int gridIdx)
+        {
+            var cfg = new CollectionClientConfiguration
+            {
+                GroupName = groupName,
+                CacheMode = cacheMode,
+                Backups = 1
+            };
+
+            var igniteSet = Client.GetIgniteSet<int>(name, cfg);
+
+            // Warm up.
+            igniteSet.Add(0);
+            ClearLoggers();
+
+            // Test.
+            igniteSet.Add(item);
+
+            Assert.AreEqual(gridIdx, GetClientRequestGridIndex("ValueAdd", "datastructures.ClientIgniteSet"));
+        }
+
+        [Test]
+        [TestCase("default-grp-partitioned-set-2", null, CacheMode.Partitioned, 1, 0)]
+        [TestCase("default-grp-partitioned-set-2", null, CacheMode.Partitioned, 2, 0)]
+        [TestCase("default-grp-partitioned-set-2", null, CacheMode.Partitioned, 3, 0)]
+        [TestCase("default-grp-partitioned-set-2", null, CacheMode.Partitioned, 4, 0)]
+        [TestCase("custom-grp-partitioned-set-2", "testIgniteSetColocated1", CacheMode.Partitioned, 1, 1)]
+        [TestCase("custom-grp-partitioned-set-2", "testIgniteSetColocated1", CacheMode.Partitioned, 2, 1)]
+        [TestCase("custom-grp-partitioned-set-2", "testIgniteSetColocated1", CacheMode.Partitioned, 3, 1)]
+        [TestCase("custom-grp-replicated-set-2", "testIgniteSetColocated2", CacheMode.Replicated, 1, 1)]
+        [TestCase("custom-grp-replicated-set-2", "testIgniteSetColocated2", CacheMode.Replicated, 2, 1)]
+        [TestCase("custom-grp-replicated-set-2", "testIgniteSetColocated2", CacheMode.Replicated, 3, 1)]
+        public void IgniteSetColocated_RequestIsRoutedToPrimaryNode(
+            string name, string groupName, CacheMode cacheMode, int item, int gridIdx)
+        {
+            var cfg = new CollectionClientConfiguration
+            {
+                GroupName = groupName,
+                CacheMode = cacheMode,
+                Colocated = true,
+                Backups = 1
+            };
+
+            var igniteSet = Client.GetIgniteSet<int>(name, cfg);
+
+            // Warm up.
+            igniteSet.Add(0);
+            ClearLoggers();
+
+            // Test.
+            igniteSet.Add(1);
+
+            Assert.AreEqual(gridIdx, GetClientRequestGridIndex("ValueAdd", "datastructures.ClientIgniteSet"));
         }
 
         protected override IgniteClientConfiguration GetClientConfiguration()

@@ -96,6 +96,15 @@ final class ClientChannelConfiguration {
     /** User attributes. */
     private final Map<String, String> userAttrs;
 
+    /** Heartbeats. */
+    private final boolean heartbeatEnabled;
+
+    /** Heartbeat interval, in milliseconds. */
+    private final long heartbeatInterval;
+
+    /** Automatic binary configuration. */
+    private final boolean autoBinaryConfigurationEnabled;
+
     /**
      * Constructor.
      */
@@ -123,6 +132,9 @@ final class ClientChannelConfiguration {
         this.addr = addr;
         this.userAttrs = cfg.getUserAttributes();
         this.asyncContinuationExecutor = cfg.getAsyncContinuationExecutor();
+        this.heartbeatEnabled = cfg.isHeartbeatEnabled();
+        this.heartbeatInterval = cfg.getHeartbeatInterval();
+        this.autoBinaryConfigurationEnabled = cfg.isAutoBinaryConfigurationEnabled();
     }
 
     /**
@@ -278,5 +290,26 @@ final class ClientChannelConfiguration {
      */
     public Executor getAsyncContinuationExecutor() {
         return asyncContinuationExecutor;
+    }
+
+    /**
+     * @return Whether heartbeats are enabled.
+     */
+    public boolean getHeartbeatEnabled() {
+        return heartbeatEnabled;
+    }
+
+    /**
+     * @return Heartbeat interval, in milliseconds.
+     */
+    public long getHeartbeatInterval() {
+        return heartbeatInterval;
+    }
+
+    /**
+     * @return Whether automatic binary configuration is enabled.
+     */
+    public boolean isAutoBinaryConfigurationEnabled() {
+        return autoBinaryConfigurationEnabled;
     }
 }

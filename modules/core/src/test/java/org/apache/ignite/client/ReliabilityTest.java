@@ -39,7 +39,10 @@ import org.apache.ignite.cache.CacheMode;
 import org.apache.ignite.cache.query.Query;
 import org.apache.ignite.cache.query.QueryCursor;
 import org.apache.ignite.cache.query.ScanQuery;
+import org.apache.ignite.configuration.ClientConfiguration;
+import org.apache.ignite.configuration.ClientConnectorConfiguration;
 import org.apache.ignite.configuration.DataStorageConfiguration;
+import org.apache.ignite.configuration.IgniteConfiguration;
 import org.apache.ignite.failure.FailureHandler;
 import org.apache.ignite.internal.client.thin.AbstractThinClientTest;
 import org.apache.ignite.internal.client.thin.ClientOperation;
@@ -119,7 +122,8 @@ public class ReliabilityTest extends AbstractThinClientTest {
 
                         assertEquals("Unexpected entries", data, act);
                     }
-                } catch (ClientConnectionException ignored) {
+                }
+                catch (ClientConnectionException ignored) {
                     // QueryCursor.getAll always executes on the same channel where the cursor is open,
                     // so failover is not possible, and the call will fail when connection drops.
                 }
@@ -312,13 +316,13 @@ public class ReliabilityTest extends AbstractThinClientTest {
 
         String nullOpsNames = nullOps.stream().map(Enum::name).collect(Collectors.joining(", "));
 
-        long expectedNullCount = 12;
+        long expectedNullCnt = 19;
 
-        String msg = expectedNullCount
+        String msg = nullOps.size()
                 + " operation codes do not have public equivalent. When adding new codes, update ClientOperationType too. Missing ops: "
                 + nullOpsNames;
 
-        assertEquals(msg, expectedNullCount, nullOps.size());
+        assertEquals(msg, expectedNullCnt, nullOps.size());
     }
 
     /**
@@ -352,7 +356,8 @@ public class ReliabilityTest extends AbstractThinClientTest {
                 }
 
                 fail("ClientReconnectedException or ClientConnectionException must be thrown");
-            } catch (ClientReconnectedException | ClientConnectionException expected) {
+            }
+            catch (ClientReconnectedException | ClientConnectionException expected) {
                 // No-op.
             }
         }
@@ -492,14 +497,18 @@ public class ReliabilityTest extends AbstractThinClientTest {
 
             String msg = "critical error message";
 
-            ignite.events().localListen(e -> { throw new Error(msg); }, EVT_CACHE_OBJECT_READ);
+            ignite.events().localListen(e -> {
+                throw new Error(msg);
+            }, EVT_CACHE_OBJECT_READ);
 
             GridTestUtils.assertThrowsAnyCause(log, () -> cache.get(0), ClientServerError.class, msg);
 
             assertFalse(failure.get());
 
             // OutOfMemoryError should also invoke failure handler.
-            ignite.events().localListen(e -> { throw new OutOfMemoryError(msg); }, EVT_CACHE_OBJECT_REMOVED);
+            ignite.events().localListen(e -> {
+                throw new OutOfMemoryError(msg);
+            }, EVT_CACHE_OBJECT_REMOVED);
 
             GridTestUtils.assertThrowsAnyCause(log, () -> cache.remove(0), ClientServerError.class, msg);
 
@@ -553,20 +562,44 @@ public class ReliabilityTest extends AbstractThinClientTest {
             // PersonExternalizable once again.
             result = svc.testMethod(person);
             assertEquals("testMethod(PersonExternalizable person): " + person, result);
-        } finally {
+        }
+        finally {
             if (ignite != null) {
                 try {
                     ignite.close();
-                } catch (Throwable ignore) {
+                }
+                catch (Throwable ignore) {
+                    // Ignore.
                 }
             }
 
             if (client != null) {
                 try {
                     client.close();
-                } catch (Throwable ignore) {
+                }
+                catch (Throwable ignore) {
+                    // Ignore.
                 }
             }
+        }
+    }
+
+    /**
+     * Tests that server does not disconnect idle clients when heartbeats are enabled.
+     */
+    @Test
+    public void testServerDoesNotDisconnectIdleClientWithHeartbeats() throws Exception {
+        IgniteConfiguration serverCfg = getConfiguration().setClientConnectorConfiguration(
+                new ClientConnectorConfiguration().setIdleTimeout(2000));
+
+        ClientConfiguration clientCfg = new ClientConfiguration()
+                .setAddresses("127.0.0.1")
+                .setHeartbeatEnabled(true)
+                .setHeartbeatInterval(500);
+
+        try (Ignite ignored = startGrid(serverCfg); IgniteClient client = Ignition.startClient(clientCfg)) {
+            Thread.sleep(6000);
+            assertEquals(0, client.cacheNames().size());
         }
     }
 

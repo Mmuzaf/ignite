@@ -75,6 +75,9 @@ The options are as follows:
 -t|--tc-paths
     Path to ducktests. Must be relative path to 'IGNITE/modules/ducktests/tests' directory
 
+--subnet
+    Subnet to assign nodes IP addresses, like --subnet 172.20.0.0/16
+
 --jdk
     Set jdk version to build, default is 8
 
@@ -124,6 +127,7 @@ while [[ $# -ge 1 ]]; do
         -t|--tc-paths) TC_PATHS="$2"; shift 2;;
         -n|--num-nodes) IGNITE_NUM_CONTAINERS="$2"; shift 2;;
         -j|--max-parallel) MAX_PARALLEL="$2"; shift 2;;
+        --subnet) SUBNET="--subnet $2"; shift 2;;
         --jdk) JDK_VERSION="$2"; shift 2;;
         --image) IMAGE_NAME="$2"; shift 2;;
         -f|--force) FORCE=$1; shift;;
@@ -146,8 +150,8 @@ fi
 
 # Up cluster if nothing is running
 if "$SCRIPT_DIR"/ducker-ignite ssh | grep -q '(none)'; then
-    # do not quote FORCE as bash recognize "" as input param instead of image name
-    "$SCRIPT_DIR"/ducker-ignite up $FORCE -n "$IGNITE_NUM_CONTAINERS" "$IMAGE_NAME" || die "ducker-ignite up failed"
+    # do not quote FORCE and SUBNET as bash recognize "" as input param instead of image name
+    "$SCRIPT_DIR"/ducker-ignite up $FORCE $SUBNET -n "$IGNITE_NUM_CONTAINERS" "$IMAGE_NAME" || die "ducker-ignite up failed"
 fi
 
 DUCKTAPE_OPTIONS="--globals '$GLOBALS'"
@@ -160,5 +164,5 @@ if [[ -n "$MAX_PARALLEL" ]]; then
   DUCKTAPE_OPTIONS="$DUCKTAPE_OPTIONS --max-parallel $MAX_PARALLEL"
 fi
 
-"$SCRIPT_DIR"/ducker-ignite test "$TC_PATHS" "$DUCKTAPE_OPTIONS" \
+"$SCRIPT_DIR"/ducker-ignite test $TC_PATHS "$DUCKTAPE_OPTIONS" \
   || die "ducker-ignite test failed"

@@ -17,7 +17,6 @@
 
 package org.apache.ignite.internal.processors.cache.persistence.snapshot;
 
-import java.util.Collections;
 import java.util.UUID;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.cache.CacheMode;
@@ -29,7 +28,6 @@ import org.apache.ignite.internal.processors.cache.verify.IdleVerifyResultV2;
 import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.lang.IgnitePredicate;
 import org.junit.Test;
-import org.junit.runners.Parameterized;
 
 import static java.util.Collections.singletonList;
 import static org.apache.ignite.testframework.GridTestUtils.assertContains;
@@ -38,12 +36,6 @@ import static org.apache.ignite.testframework.GridTestUtils.assertContains;
  * Cluster-wide snapshot test check command with indexes.
  */
 public class IgniteClusterSnapshotCheckWithIndexesTest extends AbstractSnapshotSelfTest {
-    /** Parameters. Encryption is not supported by snapshot validation. */
-    @Parameterized.Parameters(name = "Encryption is disabled")
-    public static Iterable<Boolean> disabledEncryption() {
-        return Collections.singletonList(false);
-    }
-
     /** @throws Exception If fails. */
     @Test
     public void testClusterSnapshotCheckEmptyCache() throws Exception {
@@ -52,7 +44,7 @@ public class IgniteClusterSnapshotCheckWithIndexesTest extends AbstractSnapshotS
 
         ignite.snapshot().createSnapshot(SNAPSHOT_NAME).get(TIMEOUT);
 
-        IdleVerifyResultV2 res = ignite.context().cache().context().snapshotMgr().checkSnapshot(SNAPSHOT_NAME).get();
+        IdleVerifyResultV2 res = ignite.context().cache().context().snapshotMgr().checkSnapshot(SNAPSHOT_NAME, null).get();
 
         StringBuilder b = new StringBuilder();
         res.print(b::append, true);
@@ -69,7 +61,7 @@ public class IgniteClusterSnapshotCheckWithIndexesTest extends AbstractSnapshotS
 
         ignite.snapshot().createSnapshot(SNAPSHOT_NAME).get(TIMEOUT);
 
-        IdleVerifyResultV2 res = ignite.context().cache().context().snapshotMgr().checkSnapshot(SNAPSHOT_NAME).get();
+        IdleVerifyResultV2 res = ignite.context().cache().context().snapshotMgr().checkSnapshot(SNAPSHOT_NAME, null).get();
 
         StringBuilder b = new StringBuilder();
         res.print(b::append, true);
@@ -95,7 +87,7 @@ public class IgniteClusterSnapshotCheckWithIndexesTest extends AbstractSnapshotS
 
         grid(0).snapshot().createSnapshot(SNAPSHOT_NAME).get(TIMEOUT);
 
-        IdleVerifyResultV2 res = grid(0).context().cache().context().snapshotMgr().checkSnapshot(SNAPSHOT_NAME).get();
+        IdleVerifyResultV2 res = grid(0).context().cache().context().snapshotMgr().checkSnapshot(SNAPSHOT_NAME, null).get();
 
         StringBuilder b = new StringBuilder();
         res.print(b::append, true);

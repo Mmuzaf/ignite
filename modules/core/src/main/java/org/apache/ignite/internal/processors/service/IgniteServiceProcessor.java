@@ -71,6 +71,7 @@ import org.apache.ignite.internal.processors.cluster.DiscoveryDataClusterState;
 import org.apache.ignite.internal.processors.cluster.IgniteChangeGlobalStateSupport;
 import org.apache.ignite.internal.processors.metric.MetricRegistry;
 import org.apache.ignite.internal.processors.platform.services.PlatformService;
+import org.apache.ignite.internal.processors.platform.services.PlatformServiceConfiguration;
 import org.apache.ignite.internal.processors.security.OperationSecurityContext;
 import org.apache.ignite.internal.processors.security.SecurityContext;
 import org.apache.ignite.internal.util.future.GridCompoundFuture;
@@ -87,8 +88,8 @@ import org.apache.ignite.marshaller.jdk.JdkMarshaller;
 import org.apache.ignite.plugin.security.SecurityException;
 import org.apache.ignite.plugin.security.SecurityPermission;
 import org.apache.ignite.services.Service;
+import org.apache.ignite.services.ServiceCallInterceptor;
 import org.apache.ignite.services.ServiceConfiguration;
-import org.apache.ignite.services.ServiceContext;
 import org.apache.ignite.services.ServiceDeploymentException;
 import org.apache.ignite.services.ServiceDescriptor;
 import org.apache.ignite.spi.IgniteNodeValidationResult;
@@ -169,6 +170,12 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
     private final ConcurrentMap<IgniteUuid, ServiceInfo> registeredServices = new ConcurrentHashMap<>();
 
     /**
+     * Map of registered services, kept in-sync with registeredServices above, and keyed by name to improve performance
+     * for lookups.
+     */
+    private final ConcurrentMap<String, ServiceInfo> registeredServicesByName = new ConcurrentHashMap<>();
+
+    /**
      * Collection of services information that were processed by deployment worker. <b>It is updated from deployment
      * worker</b>.
      * <p/>
@@ -181,6 +188,12 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
      * @see ServiceDeploymentTask
      */
     private final ConcurrentMap<IgniteUuid, ServiceInfo> deployedServices = new ConcurrentHashMap<>();
+
+    /**
+     * Map of deployed services, kept in-sync with deployedServices above, and keyed by name to improve performance
+     * for lookups.
+     */
+    private final ConcurrentMap<String, ServiceInfo> deployedServicesByName = new ConcurrentHashMap<>();
 
     /** Deployment futures. */
     private final ConcurrentMap<IgniteUuid, GridServiceDeploymentFuture<IgniteUuid>> depFuts = new ConcurrentHashMap<>();
@@ -313,6 +326,7 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
         cancelDeployedServices();
 
         registeredServices.clear();
+        registeredServicesByName.clear();
 
         // If user requests sent to network but not received back to handle in deployment manager.
         Stream.concat(depFuts.values().stream(), undepFuts.values().stream()).forEach(fut -> {
@@ -338,6 +352,7 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
         assert opsLock.isWriteLockedByCurrentThread();
 
         deployedServices.clear();
+        deployedServicesByName.clear();
 
         ctx.metric().remove(SERVICE_METRIC_REGISTRY);
 
@@ -554,6 +569,9 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
         ensure(c.getService() != null, "getService() != null", c.getService());
         ensure(c.getTotalCount() > 0 || c.getMaxPerNodeCount() > 0,
             "c.getTotalCount() > 0 || c.getMaxPerNodeCount() > 0", null);
+        ensure(!c.isStatisticsEnabled() || !(c.getService() instanceof PlatformService) ||
+            c instanceof PlatformServiceConfiguration, "The service is a platform service and has statistics" +
+            "enabled. Service configuration must be PlatformServiceConfiguration.", null);
     }
 
     /**
@@ -663,8 +681,12 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
             if (err == null) {
                 try {
                     byte[] srvcBytes = U.marshal(marsh, cfg.getService());
+                    byte[] interceptorsBytes = U.marshal(marsh, cfg.getInterceptors());
 
-                    cfgsCp.add(new LazyServiceConfiguration(cfg, srvcBytes));
+                    String[] knownSvcMdtNames = cfg instanceof PlatformServiceConfiguration ?
+                        ((PlatformServiceConfiguration)cfg).mtdNames() : null;
+
+                    cfgsCp.add(new LazyServiceConfiguration(cfg, srvcBytes, interceptorsBytes).platformMtdNames(knownSvcMdtNames));
                 }
                 catch (Exception e) {
                     U.error(log, "Failed to marshal service with configured marshaller " +
@@ -1061,37 +1083,7 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
     ) throws IgniteException {
         ctx.security().authorize(name, SecurityPermission.SERVICE_INVOKE);
 
-        if (hasLocalNode(prj)) {
-            ServiceContextImpl ctx = serviceContext(name);
-
-            if (ctx != null && !ctx.isStatisticsEnabled()) {
-                Service srvc = ctx.service();
-
-                if (srvc != null && callAttrsProvider == null) {
-                    if (srvcCls.isAssignableFrom(srvc.getClass()))
-                        return (T)srvc;
-                    else if (!PlatformService.class.isAssignableFrom(srvc.getClass())) {
-                        throw new IgniteException("Service does not implement specified interface [srvcCls="
-                                + srvcCls.getName() + ", srvcCls=" + srvc.getClass().getName() + ']');
-                    }
-                }
-            }
-        }
-
         return new GridServiceProxy<T>(prj, name, srvcCls, sticky, timeout, ctx, callAttrsProvider, keepBinary).proxy();
-    }
-
-    /**
-     * @param prj Grid nodes projection.
-     * @return Whether given projection contains any local node.
-     */
-    private boolean hasLocalNode(ClusterGroup prj) {
-        for (ClusterNode n : prj.nodes()) {
-            if (n.isLocal())
-                return true;
-        }
-
-        return false;
     }
 
     /**
@@ -1332,7 +1324,7 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
 
             if (cfg.isStatisticsEnabled()) {
                 if (invocationMetrics == null)
-                    invocationMetrics = createServiceMetrics(srvcCtx);
+                    invocationMetrics = createServiceMetrics(srvcCtx, cfg);
 
                 srvcCtx.metrics(invocationMetrics);
             }
@@ -1384,18 +1376,30 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
      * @return Copy of service.
      * @throws IgniteCheckedException If failed.
      */
-    private Service copyAndInject(ServiceConfiguration cfg, ServiceContext svcCtx) throws IgniteCheckedException {
+    private Service copyAndInject(ServiceConfiguration cfg, ServiceContextImpl svcCtx) throws IgniteCheckedException {
         if (cfg instanceof LazyServiceConfiguration) {
             LazyServiceConfiguration srvcCfg = (LazyServiceConfiguration)cfg;
 
             GridDeployment srvcDep = ctx.deploy().getDeployment(srvcCfg.serviceClassName());
+            ClassLoader clsLdr = U.resolveClassLoader(srvcDep != null ? srvcDep.classLoader() : null, ctx.config());
+            byte[] bytes = srvcCfg.serviceBytes();
 
-            byte[] bytes = ((LazyServiceConfiguration)cfg).serviceBytes();
-
-            Service srvc = U.unmarshal(marsh, bytes,
-                U.resolveClassLoader(srvcDep != null ? srvcDep.classLoader() : null, ctx.config()));
+            Service srvc = U.unmarshal(marsh, bytes, clsLdr);
 
             ctx.resource().inject(srvc, svcCtx);
+
+            ServiceCallInterceptor[] interceptors = U.unmarshal(marsh, srvcCfg.interceptorBytes(), clsLdr);
+
+            if (F.isEmpty(interceptors))
+                return srvc;
+
+            // Inject generic resources.
+            for (int i = 0; i < interceptors.length; i++)
+                ctx.resource().injectGeneric(interceptors[i]);
+
+            // Wrap in a composite interceptor if necessary.
+            svcCtx.interceptor(interceptors.length == 1 ?
+                interceptors[0] : new CompositeServiceCallInterceptor(interceptors));
 
             return srvc;
         }
@@ -1548,9 +1552,9 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
      * @return @return Service's id if exists, otherwise {@code null};
      */
     @Nullable private IgniteUuid lookupDeployedServiceId(String name) {
-        for (ServiceInfo desc : deployedServices.values()) {
-            if (desc.name().equals(name))
-                return desc.serviceId();
+        ServiceInfo serviceInfo = deployedServicesByName.get(name);
+        if (serviceInfo != null) {
+            return serviceInfo.serviceId();
         }
 
         return null;
@@ -1583,12 +1587,18 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
             return;
 
         try {
-            depActions.servicesToDeploy().forEach(deployedServices::putIfAbsent);
+            depActions.servicesToDeploy().forEach((uuid, serviceInfo) -> {
+                if (deployedServices.putIfAbsent(uuid, serviceInfo) == null) {
+                    deployedServicesByName.put(serviceInfo.name(), serviceInfo);
+                }
+            });
 
             depActions.servicesToUndeploy().forEach((srvcId, desc) -> {
                 ServiceInfo rmv = deployedServices.remove(srvcId);
 
                 assert rmv != null && rmv == desc : "Concurrent map modification.";
+
+                deployedServicesByName.remove(rmv.name());
             });
         }
         finally {
@@ -1667,9 +1677,9 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
         ServiceDeploymentActions depActions = null;
 
         if (!registeredServices.isEmpty()) {
-            depActions = new ServiceDeploymentActions();
+            depActions = new ServiceDeploymentActions(ctx);
 
-            depActions.servicesToDeploy(new HashMap<>(registeredServices));
+            depActions.servicesToDeploy(registeredServices);
         }
 
         depMgr.onLocalJoin(evt, discoCache, depActions);
@@ -1807,6 +1817,7 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
             }
             else if (req instanceof ServiceUndeploymentRequest) {
                 ServiceInfo rmv = registeredServices.remove(reqSrvcId);
+                registeredServicesByName.remove(oldDesc.name());
 
                 assert oldDesc == rmv : "Concurrent map modification.";
 
@@ -1815,7 +1826,7 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
         }
 
         if (!toDeploy.isEmpty() || !toUndeploy.isEmpty()) {
-            ServiceDeploymentActions depActions = new ServiceDeploymentActions();
+            ServiceDeploymentActions depActions = new ServiceDeploymentActions(ctx);
 
             if (!toDeploy.isEmpty())
                 depActions.servicesToDeploy(toDeploy);
@@ -1834,6 +1845,7 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
         desc.context(ctx);
 
         registeredServices.put(desc.serviceId(), desc);
+        registeredServicesByName.put(desc.name(), desc);
     }
 
     /**
@@ -1843,10 +1855,10 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
         if (msg.activate() && registeredServices.isEmpty())
             return;
 
-        ServiceDeploymentActions depActions = new ServiceDeploymentActions();
+        ServiceDeploymentActions depActions = new ServiceDeploymentActions(ctx);
 
         if (msg.activate())
-            depActions.servicesToDeploy(new HashMap<>(registeredServices));
+            depActions.servicesToDeploy(registeredServices);
         else
             depActions.deactivate(true);
 
@@ -1876,11 +1888,14 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
         }
 
         if (!toUndeploy.isEmpty()) {
-            ServiceDeploymentActions depActions = new ServiceDeploymentActions();
+            ServiceDeploymentActions depActions = new ServiceDeploymentActions(ctx);
 
             depActions.servicesToUndeploy(toUndeploy);
 
             msg.servicesDeploymentActions(depActions);
+
+            // Remove the names from the service-by-name map as well
+            toUndeploy.values().forEach((desc) -> registeredServicesByName.remove(desc.name()));
         }
     }
 
@@ -1920,7 +1935,7 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
             servicesTopsUpdateMux.notifyAll();
         }
 
-        ServiceDeploymentActions depActions = new ServiceDeploymentActions();
+        ServiceDeploymentActions depActions = new ServiceDeploymentActions(ctx);
 
         depActions.deploymentTopologies(fullTops);
         depActions.deploymentErrors(fullErrors);
@@ -1933,12 +1948,7 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
      * @return Mapped service descriptor. Possibly {@code null} if not found.
      */
     @Nullable private ServiceInfo lookupInRegisteredServices(String name) {
-        for (ServiceInfo desc : registeredServices.values()) {
-            if (desc.name().equals(name))
-                return desc;
-        }
-
-        return null;
+        return registeredServicesByName.get(name);
     }
 
     /**
@@ -2012,18 +2022,27 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
      * Creates metrics registry for the invocation histograms.
      *
      * @param srvcCtx ServiceContext.
+     * @param cfg Service configuration.
      * @return Created metric registry.
      */
-    private ReadOnlyMetricRegistry createServiceMetrics(ServiceContextImpl srvcCtx) {
+    private ReadOnlyMetricRegistry createServiceMetrics(ServiceContextImpl srvcCtx, ServiceConfiguration cfg) {
         MetricRegistry metricRegistry = ctx.metric().registry(serviceMetricRegistryName(srvcCtx.name()));
 
-        for (Class<?> itf : allInterfaces(srvcCtx.service().getClass())) {
-            for (Method mtd : itf.getMethods()) {
-                if (metricIgnored(mtd.getDeclaringClass()))
-                    continue;
+        if (cfg instanceof LazyServiceConfiguration && ((LazyServiceConfiguration)cfg).platformMtdNames() != null) {
+            for (String definedMtdName : ((LazyServiceConfiguration)cfg).platformMtdNames()) {
+                metricRegistry.histogram(definedMtdName, DEFAULT_INVOCATION_BOUNDS,
+                    DESCRIPTION_OF_INVOCATION_METRIC_PREF + '\'' + definedMtdName + "()'");
+            }
+        }
+        else {
+            for (Class<?> itf : allInterfaces(srvcCtx.service().getClass())) {
+                for (Method mtd : itf.getMethods()) {
+                    if (metricIgnored(mtd.getDeclaringClass()))
+                        continue;
 
-                metricRegistry.histogram(mtd.getName(), DEFAULT_INVOCATION_BOUNDS, DESCRIPTION_OF_INVOCATION_METRIC_PREF +
-                    '\'' + mtd.getName() + "()'");
+                    metricRegistry.histogram(mtd.getName(), DEFAULT_INVOCATION_BOUNDS,
+                        DESCRIPTION_OF_INVOCATION_METRIC_PREF + '\'' + mtd.getName() + "()'");
+                }
             }
         }
 
@@ -2043,7 +2062,7 @@ public class IgniteServiceProcessor extends GridProcessorAdapter implements Igni
      * @param srvcName Name of the service.
      * @return registry name for service {@code srvcName}.
      */
-    static String serviceMetricRegistryName(String srvcName) {
+    public static String serviceMetricRegistryName(String srvcName) {
         return metricName(SERVICE_METRIC_REGISTRY, srvcName);
     }
 }

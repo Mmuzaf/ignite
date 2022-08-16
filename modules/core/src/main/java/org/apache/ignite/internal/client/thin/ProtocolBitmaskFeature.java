@@ -49,11 +49,23 @@ public enum ProtocolBitmaskFeature {
     /** Additional SqlFieldsQuery properties: partitions, updateBatchSize */
     QRY_PARTITIONS_BATCH_SIZE(7),
 
+    /** Binary configuration retrieval. */
+    BINARY_CONFIGURATION(8),
+
     /** Handle of {@link ClientServices#serviceDescriptors()}. */
     GET_SERVICE_DESCRIPTORS(9),
 
     /** Invoke service methods with caller context. */
-    SERVICE_INVOKE_CALLCTX(10);
+    SERVICE_INVOKE_CALLCTX(10),
+
+    /** Handle OP_HEARTBEAT and OP_GET_IDLE_TIMEOUT. */
+    HEARTBEAT(11),
+
+    /** Data replication operations: {@link TcpClientCache#putAllConflict}, {@link TcpClientCache#removeAllConflict}. */
+    DATA_REPLICATION_OPERATIONS(12),
+
+    /** Send all mappings to the client including non-default affinity functions. */
+    ALL_AFFINITY_MAPPINGS(13);
 
     /** */
     private static final EnumSet<ProtocolBitmaskFeature> ALL_FEATURES_AS_ENUM_SET =

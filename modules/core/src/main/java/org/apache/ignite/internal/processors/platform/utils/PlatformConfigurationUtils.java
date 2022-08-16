@@ -115,6 +115,7 @@ import org.apache.ignite.ssl.SslContextFactory;
 import org.apache.ignite.transactions.TransactionConcurrency;
 import org.apache.ignite.transactions.TransactionIsolation;
 import org.apache.ignite.util.AttributeNodeFilter;
+import static java.util.Optional.ofNullable;
 
 /**
  * Configuration utils.
@@ -178,7 +179,7 @@ public class PlatformConfigurationUtils {
 
         ccfg.setAtomicityMode(CacheAtomicityMode.fromOrdinal(in.readInt()));
         ccfg.setBackups(in.readInt());
-        ccfg.setCacheMode(CacheMode.fromOrdinal(in.readInt()));
+        ccfg.setCacheMode(CacheMode.fromCode(in.readInt()));
         ccfg.setCopyOnRead(in.readBoolean());
         ccfg.setEagerTtl(in.readBoolean());
         ccfg.setInvalidate(in.readBoolean());
@@ -278,7 +279,8 @@ public class PlatformConfigurationUtils {
                 if (in.readBoolean()) {
                     // Java cache plugin.
                     readCachePluginConfiguration(ccfg, in);
-                } else {
+                }
+                else {
                     // Platform cache plugin.
                     plugins.add(new PlatformCachePluginConfiguration(in.readObjectDetached()));
                 }
@@ -783,7 +785,8 @@ public class PlatformConfigurationUtils {
 
         if (consId instanceof Serializable) {
             cfg.setConsistentId((Serializable)consId);
-        } else if (consId != null) {
+        }
+        else if (consId != null) {
             throw new IgniteException("IgniteConfiguration.ConsistentId should be Serializable.");
         }
 
@@ -870,7 +873,7 @@ public class PlatformConfigurationUtils {
 
             atomic.setAtomicSequenceReserveSize(in.readInt());
             atomic.setBackups(in.readInt());
-            atomic.setCacheMode(CacheMode.fromOrdinal(in.readInt()));
+            atomic.setCacheMode(CacheMode.fromCode(in.readInt()));
 
             cfg.setAtomicConfiguration(atomic);
         }
@@ -1103,7 +1106,7 @@ public class PlatformConfigurationUtils {
 
         writeEnumInt(writer, ccfg.getAtomicityMode(), CacheConfiguration.DFLT_CACHE_ATOMICITY_MODE);
         writer.writeInt(ccfg.getBackups());
-        writeEnumInt(writer, ccfg.getCacheMode(), CacheConfiguration.DFLT_CACHE_MODE);
+        writer.writeInt(ofNullable(ccfg.getCacheMode()).orElse(CacheConfiguration.DFLT_CACHE_MODE).code());
         writer.writeBoolean(ccfg.isCopyOnRead());
         writer.writeBoolean(ccfg.isEagerTtl());
         writer.writeBoolean(ccfg.isInvalidate());
@@ -1188,7 +1191,8 @@ public class PlatformConfigurationUtils {
                 writer.writeString(key.getTypeName());
                 writer.writeString(key.getAffinityKeyFieldName());
             }
-        } else {
+        }
+        else {
             writer.writeInt(0);
         }
 
@@ -1366,7 +1370,8 @@ public class PlatformConfigurationUtils {
         if (cfg.getSystemWorkerBlockedTimeout() != null) {
             w.writeBoolean(true);
             w.writeLong(cfg.getSystemWorkerBlockedTimeout());
-        } else {
+        }
+        else {
             w.writeBoolean(false);
         }
         w.writeBoolean(true);
@@ -1486,7 +1491,7 @@ public class PlatformConfigurationUtils {
 
             w.writeInt(atomic.getAtomicSequenceReserveSize());
             w.writeInt(atomic.getBackups());
-            writeEnumInt(w, atomic.getCacheMode(), AtomicConfiguration.DFLT_CACHE_MODE);
+            w.writeInt(ofNullable(atomic.getCacheMode()).orElse(AtomicConfiguration.DFLT_CACHE_MODE).code());
         }
         else
             w.writeBoolean(false);
@@ -1554,7 +1559,8 @@ public class PlatformConfigurationUtils {
             w.writeBoolean(((StopNodeOrHaltFailureHandler)failureHnd).tryStop());
 
             w.writeLong(((StopNodeOrHaltFailureHandler)failureHnd).timeout());
-        } else
+        }
+        else
             w.writeBoolean(false);
 
         ExecutorConfiguration[] execCfgs = cfg.getExecutorConfiguration();
@@ -1566,7 +1572,8 @@ public class PlatformConfigurationUtils {
                 w.writeString(execCfg.getName());
                 w.writeInt(execCfg.getSize());
             }
-        } else
+        }
+        else
             w.writeInt(0);
 
         w.writeString(cfg.getIgniteHome());
@@ -1921,7 +1928,8 @@ public class PlatformConfigurationUtils {
             w.writeBoolean(cfg.isTcpNoDelay());
             w.writeInt(cfg.getMaxOpenCursorsPerConnection());
             w.writeInt(cfg.getThreadPoolSize());
-        } else
+        }
+        else
             w.writeBoolean(false);
     }
 
@@ -1952,6 +1960,7 @@ public class PlatformConfigurationUtils {
             cfg.setThinClientConfiguration(new ThinClientConfiguration()
                 .setMaxActiveTxPerConnection(in.readInt())
                 .setMaxActiveComputeTasksPerConnection(in.readInt())
+                .sendServerExceptionStackTraceToClient(in.readBoolean())
             );
         }
 
@@ -1991,10 +2000,12 @@ public class PlatformConfigurationUtils {
                 w.writeBoolean(true);
                 w.writeInt(thinCfg.getMaxActiveTxPerConnection());
                 w.writeInt(thinCfg.getMaxActiveComputeTasksPerConnection());
+                w.writeBoolean(thinCfg.sendServerExceptionStackTraceToClient());
             }
             else
                 w.writeBoolean(false);
-        } else
+        }
+        else
             w.writeBoolean(false);
     }
 
@@ -2160,8 +2171,8 @@ public class PlatformConfigurationUtils {
             w.writeLong(cfg.getRateTimeInterval());
             w.writeInt(cfg.getCheckpointWriteOrder().ordinal());
             w.writeBoolean(cfg.isWriteThrottlingEnabled());
-
-        } else
+        }
+        else
             w.writeBoolean(false);
     }
 

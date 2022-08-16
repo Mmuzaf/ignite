@@ -31,7 +31,6 @@ import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteSystemProperties;
-import org.apache.ignite.cache.CacheMode;
 import org.apache.ignite.cache.CachePeekMode;
 import org.apache.ignite.cache.CacheRebalanceMode;
 import org.apache.ignite.cache.CacheWriteSynchronizationMode;
@@ -66,7 +65,6 @@ import org.apache.ignite.testframework.MvccFeatureChecker;
 import org.apache.ignite.testframework.junits.WithSystemProperty;
 import org.apache.ignite.testframework.junits.common.GridCommonAbstractTest;
 import org.junit.Test;
-
 import static org.apache.ignite.cache.CacheAtomicityMode.ATOMIC;
 import static org.apache.ignite.cache.CacheAtomicityMode.TRANSACTIONAL;
 import static org.apache.ignite.cluster.ClusterState.ACTIVE;
@@ -88,12 +86,6 @@ public class IgnitePdsWithTtlTest extends GridCommonAbstractTest {
 
     /** */
     private static final String CACHE_NAME_TX = "expirable-cache-tx";
-
-    /** */
-    private static final String CACHE_NAME_LOCAL_ATOMIC = "expirable-cache-local-atomic";
-
-    /** */
-    private static final String CACHE_NAME_LOCAL_TX = "expirable-cache-local-tx";
 
     /** */
     private static final String CACHE_NAME_NEAR_ATOMIC = "expirable-cache-near-atomic";
@@ -163,8 +155,6 @@ public class IgnitePdsWithTtlTest extends GridCommonAbstractTest {
         cfg.setCacheConfiguration(
             getCacheConfiguration(CACHE_NAME_ATOMIC).setAtomicityMode(ATOMIC),
             getCacheConfiguration(CACHE_NAME_TX).setAtomicityMode(TRANSACTIONAL),
-            getCacheConfiguration(CACHE_NAME_LOCAL_ATOMIC).setAtomicityMode(ATOMIC).setCacheMode(CacheMode.LOCAL),
-            getCacheConfiguration(CACHE_NAME_LOCAL_TX).setAtomicityMode(TRANSACTIONAL).setCacheMode(CacheMode.LOCAL),
             getCacheConfiguration(CACHE_NAME_NEAR_ATOMIC).setAtomicityMode(ATOMIC)
                 .setNearConfiguration(new NearCacheConfiguration<>()),
             getCacheConfiguration(CACHE_NAME_NEAR_TX).setAtomicityMode(TRANSACTIONAL)
@@ -327,8 +317,6 @@ public class IgnitePdsWithTtlTest extends GridCommonAbstractTest {
             List<IgniteCache<Object, Object>> caches = F.asList(
                 srv.cache(CACHE_NAME_ATOMIC),
                 srv.cache(CACHE_NAME_TX),
-                srv.cache(CACHE_NAME_LOCAL_ATOMIC),
-                srv.cache(CACHE_NAME_LOCAL_TX),
                 srv.cache(CACHE_NAME_NEAR_ATOMIC),
                 srv.cache(CACHE_NAME_NEAR_TX)
             );
@@ -501,10 +489,12 @@ public class IgnitePdsWithTtlTest extends GridCommonAbstractTest {
      *
      */
     protected void fillCache(IgniteCache<Integer, byte[]> cache) {
-        cache.putAll(new TreeMap<Integer, byte[]>() {{
-            for (int i = 0; i < ENTRIES; i++)
-                put(i, new byte[1024]);
-        }});
+        TreeMap<Integer, byte[]> data = new TreeMap<>();
+
+        for (int i = 0; i < ENTRIES; i++)
+            data.put(i, new byte[1024]);
+
+        cache.putAll(data);
 
         //Touch entries.
         for (int i = 0; i < ENTRIES; i++)

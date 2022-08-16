@@ -162,7 +162,6 @@ public class LongDestroyDurableBackgroundTaskTest extends GridCommonAbstractTest
 
     /** */
     private final ListeningTestLogger testLog = new ListeningTestLogger(
-        false,
         log(),
         blockedSysCriticalThreadLsnr,
         pendingDelFinishedLsnr,
@@ -359,10 +358,10 @@ public class LongDestroyDurableBackgroundTaskTest extends GridCommonAbstractTest
      * @param ignite Ignite instance.
      */
     private void validateIndexes(Ignite ignite) {
-        Set<UUID> nodeIds = new HashSet<UUID>() {{
-            add(grid(RESTARTED_NODE_NUM).cluster().localNode().id());
-            add(grid(ALWAYS_ALIVE_NODE_NUM).cluster().localNode().id());
-        }};
+        Set<UUID> nodeIds = new HashSet<>();
+
+        nodeIds.add(grid(RESTARTED_NODE_NUM).cluster().localNode().id());
+        nodeIds.add(grid(ALWAYS_ALIVE_NODE_NUM).cluster().localNode().id());
 
         log.info("Doing indexes validation.");
 

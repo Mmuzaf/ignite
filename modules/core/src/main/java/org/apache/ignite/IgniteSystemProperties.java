@@ -37,11 +37,13 @@ import org.apache.ignite.internal.cache.query.index.sorted.inline.InlineRecommen
 import org.apache.ignite.internal.client.GridClient;
 import org.apache.ignite.internal.marshaller.optimized.OptimizedMarshaller;
 import org.apache.ignite.internal.processors.cache.persistence.checkpoint.CheckpointEntry;
+import org.apache.ignite.internal.processors.cache.persistence.checkpoint.CheckpointMarkersStorage;
 import org.apache.ignite.internal.processors.metastorage.DistributedMetaStorage;
 import org.apache.ignite.internal.processors.performancestatistics.FilePerformanceStatisticsWriter;
 import org.apache.ignite.internal.processors.query.schema.SchemaIndexCachePartitionWorker;
 import org.apache.ignite.internal.processors.rest.GridRestCommand;
 import org.apache.ignite.internal.util.GridLogThrottle;
+import org.apache.ignite.internal.util.IgniteUtils;
 import org.apache.ignite.lang.IgniteExperimental;
 import org.apache.ignite.mxbean.MetricsMxBean;
 import org.apache.ignite.spi.communication.tcp.TcpCommunicationSpi;
@@ -66,6 +68,7 @@ import static org.apache.ignite.internal.processors.affinity.AffinityAssignment.
 import static org.apache.ignite.internal.processors.affinity.GridAffinityAssignmentCache.DFLT_AFFINITY_HISTORY_SIZE;
 import static org.apache.ignite.internal.processors.affinity.GridAffinityAssignmentCache.DFLT_PART_DISTRIBUTION_WARN_THRESHOLD;
 import static org.apache.ignite.internal.processors.cache.CacheAffinitySharedManager.DFLT_CLIENT_CACHE_CHANGE_MESSAGE_TIMEOUT;
+import static org.apache.ignite.internal.processors.cache.CacheObjectsReleaseFuture.DFLT_IGNITE_PARTITION_RELEASE_FUTURE_WARN_LIMIT;
 import static org.apache.ignite.internal.processors.cache.GridCacheAdapter.DFLT_CACHE_RETRIES_COUNT;
 import static org.apache.ignite.internal.processors.cache.GridCacheAdapter.DFLT_CACHE_START_SIZE;
 import static org.apache.ignite.internal.processors.cache.GridCacheContext.DFLT_READ_LOAD_BALANCING;
@@ -90,6 +93,7 @@ import static org.apache.ignite.internal.processors.cache.mvcc.MvccCachingManage
 import static org.apache.ignite.internal.processors.cache.persistence.GridCacheDatabaseSharedManager.DFLT_DEFRAGMENTATION_REGION_SIZE_PERCENTAGE;
 import static org.apache.ignite.internal.processors.cache.persistence.GridCacheDatabaseSharedManager.DFLT_PDS_WAL_REBALANCE_THRESHOLD;
 import static org.apache.ignite.internal.processors.cache.persistence.checkpoint.CheckpointHistory.DFLT_PDS_MAX_CHECKPOINT_MEMORY_HISTORY_SIZE;
+import static org.apache.ignite.internal.processors.cache.persistence.checkpoint.CheckpointMarkersStorage.DFLT_IGNITE_CHECKPOINT_MAP_SNAPSHOT_THRESHOLD;
 import static org.apache.ignite.internal.processors.cache.persistence.checkpoint.CheckpointWorkflow.DFLT_CHECKPOINT_PARALLEL_SORT_THRESHOLD;
 import static org.apache.ignite.internal.processors.cache.persistence.diagnostic.pagelocktracker.PageLockTrackerFactory.DFLT_PAGE_LOCK_TRACKER_CAPACITY;
 import static org.apache.ignite.internal.processors.cache.persistence.diagnostic.pagelocktracker.PageLockTrackerFactory.HEAP_LOG;
@@ -668,9 +672,10 @@ public final class IgniteSystemProperties {
     public static final String IGNITE_H2_DEBUG_CONSOLE_PORT = "IGNITE_H2_DEBUG_CONSOLE_PORT";
 
     /**
-     * If this property is set to {@code true} then shared memory space native debug will be enabled.
+     * @deprecated This property is ignored and will be deleted in future releases.
      */
-    @SystemProperty("Enables native debug of the shared memory space")
+    @Deprecated
+    @SystemProperty("This option is ignored and will be deleted in future releases")
     public static final String IGNITE_IPC_SHMEM_SPACE_DEBUG = "IGNITE_IPC_SHMEM_SPACE_DEBUG";
 
     /**
@@ -1008,6 +1013,17 @@ public final class IgniteSystemProperties {
         "in configuration", type = String.class)
     public static final String IGNITE_OVERRIDE_CONSISTENT_ID = "IGNITE_OVERRIDE_CONSISTENT_ID";
 
+    /**
+     * System property to ignore reading hostname of the local address.
+     * <p>
+     * If set to {@code true} and {@link #IGNITE_LOCAL_HOST} is defined then
+     * {@link IgniteUtils#resolveLocalAddresses} will not add hostname of local address to the list of node's addresses.
+     * Defaults to {@code true}.
+     */
+    @SystemProperty(value = "Ignores local address's hostname if IGNITE_LOCAL_HOST is defined "
+        + "when resolving local node's addresses", defaults = "true")
+    public static final String IGNITE_IGNORE_LOCAL_HOST_NAME = "IGNITE_IGNORE_LOCAL_HOST_NAME";
+
     /** */
     @SystemProperty(value = "IO balance period in milliseconds", type = Long.class,
         defaults = "" + DFLT_IO_BALANCE_PERIOD)
@@ -1132,6 +1148,16 @@ public final class IgniteSystemProperties {
         "This property is intended for integration or performance tests")
     public static final String IGNITE_PREFER_WAL_REBALANCE = "IGNITE_PREFER_WAL_REBALANCE";
 
+    /**
+     * Threshold of the checkpoint quantity since the last earliest checkpoint map snapshot.
+     * After this thresold is reached, a snapshot of the earliest checkpoint map will be captured.
+     * Default is {@link CheckpointMarkersStorage#DFLT_IGNITE_CHECKPOINT_MAP_SNAPSHOT_THRESHOLD}.
+     */
+    @SystemProperty(value = "Threshold of the checkpoint quantity since the last earliest checkpoint map snapshot. " +
+        "After this thresold is reached, a snapshot of the earliest checkpoint map will be captured",
+        type = Integer.class, defaults = "" + DFLT_IGNITE_CHECKPOINT_MAP_SNAPSHOT_THRESHOLD)
+    public static final String IGNITE_CHECKPOINT_MAP_SNAPSHOT_THRESHOLD = "IGNITE_CHECKPOINT_MAP_SNAPSHOT_THRESHOLD";
+
     /** Ignite page memory concurrency level. */
     @SystemProperty(value = "Ignite page memory concurrency level", type = Integer.class)
     public static final String IGNITE_OFFHEAP_LOCK_CONCURRENCY_LEVEL = "IGNITE_OFFHEAP_LOCK_CONCURRENCY_LEVEL";
@@ -1182,6 +1208,15 @@ public final class IgniteSystemProperties {
         "0 means disabled", type = Integer.class, defaults = "" + DFLT_PARTITION_RELEASE_FUTURE_DUMP_THRESHOLD)
     public static final String IGNITE_PARTITION_RELEASE_FUTURE_DUMP_THRESHOLD =
         "IGNITE_PARTITION_RELEASE_FUTURE_DUMP_THRESHOLD";
+
+    /**
+     * This property specifies the maximum number of futures that are included into diagnostic message.
+     * The default value is {@code 10}.
+     */
+    @SystemProperty(value = "This property specifies the maximum number of futures that are included into diagnostic " +
+        "message", type = Integer.class, defaults = "" + DFLT_IGNITE_PARTITION_RELEASE_FUTURE_WARN_LIMIT)
+    public static final String IGNITE_PARTITION_RELEASE_FUTURE_WARN_LIMIT =
+        "IGNITE_PARTITION_RELEASE_FUTURE_WARN_LIMIT";
 
     /**
      * If this property is set, a node will forcible fail a remote node when it fails to establish a communication
@@ -1724,6 +1759,13 @@ public final class IgniteSystemProperties {
     public static final String IGNITE_SQL_ALLOW_KEY_VAL_UPDATES = "IGNITE_SQL_ALLOW_KEY_VAL_UPDATES";
 
     /**
+     * Forcibly fills missing columns belonging to the primary key with nulls or default values if those have been specified.
+     */
+    @SystemProperty(value = "Forcibly fills missing columns belonging to the primary key with nulls " +
+        "or default values if those have been specified", defaults = "false")
+    public static final String IGNITE_SQL_FILL_ABSENT_PK_WITH_DEFAULTS = "IGNITE_SQL_FILL_ABSENT_PK_WITH_DEFAULTS";
+
+    /**
      * Interval between logging of time of next auto-adjust.
      */
     @SystemProperty(value = "Interval between logging of time of next auto-adjust in milliseconds", type = Long.class,
@@ -1993,6 +2035,41 @@ public final class IgniteSystemProperties {
     @SystemProperty(value = "Maximum performance statistics cached strings threshold. String caching is " +
         "stopped when the threshold is exceeded", type = Integer.class, defaults = "" + DFLT_CACHED_STRINGS_THRESHOLD)
     public static final String IGNITE_PERF_STAT_CACHED_STRINGS_THRESHOLD = "IGNITE_PERF_STAT_CACHED_STRINGS_THRESHOLD";
+
+    /**
+     * Calcite-based SQL engine. Buffer size (count of rows) for query execution nodes.
+     */
+    @SystemProperty(value = "Calcite-based SQL engine. Buffer size (count of rows) for query execution nodes",
+        type = Integer.class)
+    public static final String IGNITE_CALCITE_EXEC_IN_BUFFER_SIZE = "IGNITE_CALCITE_EXEC_IN_BUFFER_SIZE";
+
+    /**
+     * Calcite-based SQL engine. Batch size (count of rows) for cache modify execution nodes.
+     */
+    @SystemProperty(value = "Calcite-based SQL engine. Batch size (count of rows) for cache modify execution nodes",
+        type = Integer.class)
+    public static final String IGNITE_CALCITE_EXEC_MODIFY_BATCH_SIZE = "IGNITE_CALCITE_EXEC_MODIFY_BATCH_SIZE";
+
+    /**
+     * Calcite-based SQL engine. Batch size (count of rows) for outgoing data message.
+     */
+    @SystemProperty(value = "Calcite-based SQL engine. Batch size (count of rows) for outgoing data message",
+        type = Integer.class)
+    public static final String IGNITE_CALCITE_EXEC_IO_BATCH_SIZE = "IGNITE_CALCITE_EXEC_IO_BATCH_SIZE";
+
+    /**
+     * Calcite-based SQL engine. Maximum number of pending data messages for each outbox.
+     */
+    @SystemProperty(value = "Calcite-based SQL engine. Maximum number of pending data messages for each outbox",
+        type = Integer.class)
+    public static final String IGNITE_CALCITE_EXEC_IO_BATCH_CNT = "IGNITE_CALCITE_EXEC_IO_BATCH_CNT";
+
+    /**
+     * Calcite-based SQL engine. Pretty print serialized to JSON plan, when sending it to remote nodes.
+     */
+    @SystemProperty(value = "Calcite-based SQL engine. Pretty print serialized to JSON plan, when sending it to " +
+        "remote nodes")
+    public static final String IGNITE_CALCITE_REL_JSON_PRETTY_PRINT = "IGNITE_CALCITE_REL_JSON_PRETTY_PRINT";
 
     /**
      * Count of rows, being processed within a single checkpoint lock when indexes are rebuilt.

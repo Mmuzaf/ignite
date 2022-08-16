@@ -23,6 +23,7 @@ import json
 import os
 import subprocess
 from abc import ABCMeta, abstractmethod
+import re
 
 from ignitetest.services.utils import IgniteServiceType
 from ignitetest.services.utils.config_template import IgniteClientConfigTemplate, IgniteServerConfigTemplate, \
@@ -30,6 +31,9 @@ from ignitetest.services.utils.config_template import IgniteClientConfigTemplate
 from ignitetest.services.utils.jvm_utils import create_jvm_settings, merge_jvm_settings
 from ignitetest.services.utils.path import get_home_dir, get_module_path, IgnitePathAware
 from ignitetest.services.utils.ssl.ssl_params import is_ssl_enabled
+from ignitetest.services.utils.metrics.metrics import is_opencensus_metrics_enabled, configure_opencensus_metrics,\
+    is_jmx_metrics_enabled, configure_jmx_metrics
+from ignitetest.services.utils.jmx_remote.jmx_remote_params import get_jmx_remote_params
 from ignitetest.utils.ignite_test import JFR_ENABLED
 from ignitetest.utils.version import DEV_BRANCH
 
@@ -76,30 +80,50 @@ class IgniteSpec(metaclass=ABCMeta):
     This class is a basic Spec
     """
 
-    def __init__(self, service, jvm_opts, full_jvm_opts):
+    def __init__(self, service, jvm_opts=None, merge_with_default=True):
+        """
+        :param service: Service
+        :param jvm_opts: If passed will be added with higher priority to or overwrite completely the default options
+                         depending on the merge_with_default. Either string or list of strings is allowed.
+        :param merge_with_default: If False jvm_opts will overide the default options completely. None of the
+                         default options will be applied.
+        """
         self.service = service
+        self.jvm_opts = merge_jvm_settings(self.__get_default_jvm_opts() if merge_with_default else [],
+                                           jvm_opts if jvm_opts else [])
 
-        if full_jvm_opts:
-            self.jvm_opts = full_jvm_opts
+    def __get_default_jvm_opts(self):
+        """
+        Return a set of default JVM options.
+        """
+        default_jvm_opts = create_jvm_settings(gc_dump_path=os.path.join(self.service.log_dir, "gc.log"),
+                                               oom_path=os.path.join(self.service.log_dir, "out_of_mem.hprof"))
 
-            if jvm_opts:
-                self._add_jvm_opts(jvm_opts)
-        else:
-            self.jvm_opts = create_jvm_settings(opts=jvm_opts,
-                                                gc_dump_path=os.path.join(service.log_dir, "gc.log"),
-                                                oom_path=os.path.join(service.log_dir, "out_of_mem.hprof"))
-
-        self._add_jvm_opts(["-DIGNITE_SUCCESS_FILE=" + os.path.join(self.service.persistent_root, "success_file"),
-                            "-Dlog4j.configDebug=true"])
+        default_jvm_opts = merge_jvm_settings(
+            default_jvm_opts, ["-DIGNITE_SUCCESS_FILE=" + os.path.join(self.service.persistent_root, "success_file"),
+                               "-Dlog4j.configDebug=true"])
 
         if self.service.config and self.service.config.service_type == IgniteServiceType.THIN_CLIENT:
-            self._add_jvm_opts(["-Dlog4j.configuration=file:" + self.service.log_config_file])
+            default_jvm_opts = merge_jvm_settings(default_jvm_opts,
+                                                  ["-Dlog4j.configurationFile=file:" + self.service.log_config_file])
 
-        if service.context.globals.get(JFR_ENABLED, False):
-            self._add_jvm_opts(["-XX:+UnlockCommercialFeatures",
-                                "-XX:+FlightRecorder",
-                                "-XX:StartFlightRecording=dumponexit=true," +
-                                f"filename={self.service.jfr_dir}/recording.jfr"])
+        if self.service.context.globals.get(JFR_ENABLED, False):
+            default_jvm_opts = merge_jvm_settings(default_jvm_opts,
+                                                  ["-XX:+UnlockCommercialFeatures",
+                                                   "-XX:+FlightRecorder",
+                                                   "-XX:StartFlightRecording=dumponexit=true," +
+                                                   f"filename={self.service.jfr_dir}/recording.jfr"])
+
+        jmx_remote_params = get_jmx_remote_params(self.service.context.globals)
+        if jmx_remote_params.enabled:
+            default_jvm_opts = merge_jvm_settings(default_jvm_opts,
+                                                  ["-Dcom.sun.management.jmxremote",
+                                                   "-Dcom.sun.management.jmxremote.port=%d" % jmx_remote_params.port,
+                                                   "-Dcom.sun.management.jmxremote.local.only=false",
+                                                   "-Dcom.sun.management.jmxremote.authenticate=false",
+                                                   "-Dcom.sun.management.jmxremote.ssl=false"])
+
+        return default_jvm_opts
 
     def config_templates(self):
         """
@@ -123,7 +147,22 @@ class IgniteSpec(metaclass=ABCMeta):
         """
         Extend config with custom variables
         """
+        if config.service_type == IgniteServiceType.NODE:
+            if is_opencensus_metrics_enabled(self.service):
+                config = configure_opencensus_metrics(config, self.service.context.globals)
+
+            if is_jmx_metrics_enabled(self.service):
+                config = configure_jmx_metrics(config)
+
+            if (is_opencensus_metrics_enabled(self.service) or
+                    is_jmx_metrics_enabled(self.service)):
+                config = config._replace(ignite_instance_name=self._test_id)
+
         return config
+
+    @property
+    def _test_id(self):
+        return re.sub("^[0-9A-Fa-f]+@ignitetest\\.tests\\.", "", self.service.context.test_name).replace("=", ".")[:255]
 
     def __home(self, product=None):
         """
@@ -153,10 +192,14 @@ class IgniteSpec(metaclass=ABCMeta):
         """
         libs = self.service.modules or []
 
-        libs.append("log4j")
-        libs.append("ducktests")
+        libs.append("log4j2")
 
-        return list(map(lambda m: os.path.join(self._module(m), "*"), libs))
+        if is_opencensus_metrics_enabled(self.service):
+            libs.append("opencensus")
+
+        return [os.path.join(self.__home(str(DEV_BRANCH)), "modules", "ducktests", "target", "*"),
+                os.path.join(self.__home(str(DEV_BRANCH)), "modules", "ducktests", "target", "libs", "*"),
+                *list(map(lambda m: os.path.join(self._module(m), "*"), libs))]
 
     def envs(self):
         """
@@ -212,10 +255,6 @@ class IgniteSpec(metaclass=ABCMeta):
         opts = ["-J%s" % o for o in self.jvm_opts]
         return " ".join(opts)
 
-    def _add_jvm_opts(self, opts):
-        """Properly adds JVM options to current"""
-        self.jvm_opts = merge_jvm_settings(self.jvm_opts, opts)
-
     def _runcmd(self, cmd):
         self.service.logger.debug(cmd)
         proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -245,13 +284,20 @@ class IgniteApplicationSpec(IgniteSpec):
     """
     Spec to run ignite application
     """
+    def __init__(self, service, jvm_opts=None, merge_with_default=True):
+        super().__init__(
+            service,
+            merge_jvm_settings(self.__get_default_jvm_opts() if merge_with_default else [],
+                               jvm_opts if jvm_opts else []),
+            merge_with_default)
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._add_jvm_opts(["-DIGNITE_NO_SHUTDOWN_HOOK=true",  # allows to perform operations on app termination.
-                            "-Xmx1G",
-                            "-ea",
-                            "-DIGNITE_ALLOW_ATOMIC_OPS_IN_TX=false"])
+    def __get_default_jvm_opts(self):
+        return [
+            "-DIGNITE_NO_SHUTDOWN_HOOK=true",  # allows performing operations on app termination.
+            "-Xmx1G",
+            "-ea",
+            "-DIGNITE_ALLOW_ATOMIC_OPS_IN_TX=false"
+        ]
 
     def command(self, node):
         args = [

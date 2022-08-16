@@ -484,11 +484,13 @@ public class PlatformServices extends PlatformAbstractTarget {
      * @param reader Binary reader,
      * @return Service configuration.
      */
-    @NotNull private ServiceConfiguration dotnetConfiguration(BinaryRawReaderEx reader) {
-        ServiceConfiguration cfg = new ServiceConfiguration();
+    @NotNull private PlatformServiceConfiguration dotnetConfiguration(BinaryRawReaderEx reader) {
+        PlatformServiceConfiguration cfg = new PlatformServiceConfiguration();
 
         cfg.setName(reader.readString());
-        cfg.setService(new PlatformDotNetServiceImpl(reader.readObjectDetached(), platformCtx, srvKeepBinary));
+
+        Object svc = reader.readObjectDetached();
+
         cfg.setTotalCount(reader.readInt());
         cfg.setMaxPerNodeCount(reader.readInt());
         cfg.setCacheName(reader.readString());
@@ -498,6 +500,15 @@ public class PlatformServices extends PlatformAbstractTarget {
 
         if (filter != null)
             cfg.setNodeFilter(platformCtx.createClusterNodeFilter(filter));
+
+        Object interceptors = reader.readObjectDetached();
+
+        cfg.setStatisticsEnabled(reader.readBoolean());
+
+        if (cfg.isStatisticsEnabled())
+            cfg.mtdNames(reader.readStringArray());
+
+        cfg.setService(new PlatformDotNetServiceImpl(svc, platformCtx, srvKeepBinary, interceptors));
 
         return cfg;
     }
@@ -513,9 +524,8 @@ public class PlatformServices extends PlatformAbstractTarget {
 
         List<ServiceConfiguration> cfgs = new ArrayList<>(numServices);
 
-        for (int i = 0; i < numServices; i++) {
+        for (int i = 0; i < numServices; i++)
             cfgs.add(dotnetConfiguration(reader));
-        }
 
         return cfgs;
     }
@@ -809,9 +819,12 @@ public class PlatformServices extends PlatformAbstractTarget {
     private static void writeFailedConfiguration(BinaryRawWriterEx w, ServiceConfiguration svcCfg) {
         Object dotnetSvc = null;
         Object dotnetFilter = null;
+        Object dotnetInterceptors = null;
         w.writeString(svcCfg.getName());
-        if (svcCfg.getService() instanceof PlatformDotNetServiceImpl)
+        if (svcCfg.getService() instanceof PlatformDotNetServiceImpl) {
             dotnetSvc = ((PlatformDotNetServiceImpl)svcCfg.getService()).getInternalService();
+            dotnetInterceptors = ((PlatformDotNetServiceImpl)svcCfg.getService()).getInterceptors();
+        }
 
         w.writeObjectDetached(dotnetSvc);
         w.writeInt(svcCfg.getTotalCount());
@@ -822,5 +835,8 @@ public class PlatformServices extends PlatformAbstractTarget {
         if (svcCfg.getNodeFilter() instanceof PlatformClusterNodeFilterImpl)
             dotnetFilter = ((PlatformClusterNodeFilterImpl)svcCfg.getNodeFilter()).getInternalPredicate();
         w.writeObjectDetached(dotnetFilter);
+
+        w.writeObjectDetached(dotnetInterceptors);
+        w.writeBoolean(svcCfg.isStatisticsEnabled());
     }
 }

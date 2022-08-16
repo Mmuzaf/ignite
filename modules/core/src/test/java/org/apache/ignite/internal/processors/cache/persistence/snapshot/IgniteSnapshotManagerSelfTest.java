@@ -116,6 +116,8 @@ public class IgniteSnapshotManagerSelfTest extends AbstractSnapshotSelfTest {
     @Test
     public void testSnapshotLocalPartitionMultiCpWithLoad() throws Exception {
         int valMultiplier = 2;
+        int afterSnpValMultiplier = 3;
+
         CountDownLatch slowCopy = new CountDownLatch(1);
 
         // Start grid node with data before each test.
@@ -146,7 +148,7 @@ public class IgniteSnapshotManagerSelfTest extends AbstractSnapshotSelfTest {
             cctx.localNodeId(),
             F.asMap(CU.cacheId(DEFAULT_CACHE_NAME), null),
             encryption,
-            new DelegateSnapshotSender(log, mgr.snapshotExecutorService(), mgr.localSnapshotSenderFactory().apply(SNAPSHOT_NAME)) {
+            new DelegateSnapshotSender(log, mgr.snapshotExecutorService(), mgr.localSnapshotSenderFactory().apply(SNAPSHOT_NAME, null)) {
                 @Override public void sendPart0(File part, String cacheDirName, GroupPartitionId pair, Long length) {
                     try {
                         U.await(slowCopy);
@@ -201,7 +203,7 @@ public class IgniteSnapshotManagerSelfTest extends AbstractSnapshotSelfTest {
 
             // Change data after snapshot.
             for (int i = 0; i < CACHE_KEYS_RANGE; i++)
-                ig.cache(DEFAULT_CACHE_NAME).put(i, new Account(i, 3 * i));
+                ig.cache(DEFAULT_CACHE_NAME).put(i, new Account(i, afterSnpValMultiplier * i));
 
             // Snapshot on the next checkpoint must copy page to delta file before write it to a partition.
             forceCheckpoint(ig);
@@ -268,7 +270,7 @@ public class IgniteSnapshotManagerSelfTest extends AbstractSnapshotSelfTest {
             SNAPSHOT_NAME,
             F.asMap(CU.cacheId(DEFAULT_CACHE_NAME), null),
             encryption,
-            mgr.localSnapshotSenderFactory().apply(SNAPSHOT_NAME));
+            mgr.localSnapshotSenderFactory().apply(SNAPSHOT_NAME, null));
 
         // Check the right exception thrown.
         assertThrowsAnyCause(log,
@@ -293,7 +295,7 @@ public class IgniteSnapshotManagerSelfTest extends AbstractSnapshotSelfTest {
             parts,
             encryption,
             new DelegateSnapshotSender(log, mgr0.snapshotExecutorService(),
-                mgr0.localSnapshotSenderFactory().apply(SNAPSHOT_NAME)) {
+                mgr0.localSnapshotSenderFactory().apply(SNAPSHOT_NAME, null)) {
                 @Override public void sendPart0(File part, String cacheDirName, GroupPartitionId pair, Long length) {
                     if (pair.getPartitionId() == 0)
                         throw new IgniteException(err_msg + pair);
@@ -328,7 +330,7 @@ public class IgniteSnapshotManagerSelfTest extends AbstractSnapshotSelfTest {
             SNAPSHOT_NAME,
             F.asMap(CU.cacheId(DEFAULT_CACHE_NAME), null),
             encryption,
-            new DelegateSnapshotSender(log, mgr.snapshotExecutorService(), mgr.localSnapshotSenderFactory().apply(SNAPSHOT_NAME)) {
+            new DelegateSnapshotSender(log, mgr.snapshotExecutorService(), mgr.localSnapshotSenderFactory().apply(SNAPSHOT_NAME, null)) {
                 @Override public void sendPart0(File part, String cacheDirName, GroupPartitionId pair, Long length) {
                     try {
                         U.await(cpLatch);
@@ -383,11 +385,11 @@ public class IgniteSnapshotManagerSelfTest extends AbstractSnapshotSelfTest {
 
         Map<Integer, Value> iterated = new HashMap<>();
 
-        try (GridCloseableIterator<CacheDataRow> iter = snp(ignite).partitionRowIterator(ignite.context(),
-            SNAPSHOT_NAME,
+        try (GridCloseableIterator<CacheDataRow> iter = snp(ignite).partitionRowIterator(SNAPSHOT_NAME,
             ignite.context().pdsFolderResolver().resolveFolders().folderName(),
             ccfg.getName(),
-            0)
+            0,
+            ignite.context().encryption())
         ) {
             CacheObjectContext coctx = ignite.cachex(ccfg.getName()).context().cacheObjectContext();
 
@@ -427,11 +429,11 @@ public class IgniteSnapshotManagerSelfTest extends AbstractSnapshotSelfTest {
 
         int rows = 0;
 
-        try (GridCloseableIterator<CacheDataRow> iter = snp(ignite).partitionRowIterator(ignite.context(),
-            SNAPSHOT_NAME,
+        try (GridCloseableIterator<CacheDataRow> iter = snp(ignite).partitionRowIterator(SNAPSHOT_NAME,
             ignite.context().pdsFolderResolver().resolveFolders().folderName(),
             dfltCacheCfg.getName(),
-            0)
+            0,
+            ignite.context().encryption())
         ) {
             CacheObjectContext coctx = ignite.cachex(dfltCacheCfg.getName()).context().cacheObjectContext();
 
@@ -470,11 +472,11 @@ public class IgniteSnapshotManagerSelfTest extends AbstractSnapshotSelfTest {
 
         int rows = 0;
 
-        try (GridCloseableIterator<CacheDataRow> iter = snp(ignite).partitionRowIterator(ignite.context(),
-            SNAPSHOT_NAME,
+        try (GridCloseableIterator<CacheDataRow> iter = snp(ignite).partitionRowIterator(SNAPSHOT_NAME,
             ignite.context().pdsFolderResolver().resolveFolders().folderName(),
             dfltCacheCfg.getName(),
-            0)
+            0,
+            ignite.context().encryption())
         ) {
             CacheObjectContext coctx = ignite.cachex(dfltCacheCfg.getName()).context().cacheObjectContext();
 

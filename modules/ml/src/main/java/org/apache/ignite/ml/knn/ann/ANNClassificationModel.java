@@ -66,8 +66,8 @@ public final class ANNClassificationModel extends NNClassificationModel implemen
      */
     public ANNClassificationModel(LabeledVectorSet<LabeledVector> centers,
         ANNClassificationTrainer.CentroidStat centroindsStat) {
-       this.candidates = centers;
-       this.centroindsStat = centroindsStat;
+        this.candidates = centers;
+        this.centroindsStat = centroindsStat;
     }
 
     /** */
@@ -86,8 +86,8 @@ public final class ANNClassificationModel extends NNClassificationModel implemen
 
     /** {@inheritDoc} */
     @Override public Double predict(Vector v) {
-            List<LabeledVector> neighbors = findKNearestNeighbors(v);
-            return classify(neighbors, v, weighted);
+        List<LabeledVector> neighbors = findKNearestNeighbors(v);
+        return classify(neighbors, v, weighted);
     }
 
     /** */
@@ -238,7 +238,8 @@ public final class ANNClassificationModel extends NNClassificationModel implemen
                 .readValue(new File(path.toAbsolutePath().toString()), ANNJSONExportModel.class);
 
             return exportModel.convert();
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             e.printStackTrace();
         }
         return null;
@@ -270,7 +271,8 @@ public final class ANNClassificationModel extends NNClassificationModel implemen
 
             File file = new File(path.toAbsolutePath().toString());
             mapper.writeValue(file, exportModel);
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             e.printStackTrace();
         }
     }

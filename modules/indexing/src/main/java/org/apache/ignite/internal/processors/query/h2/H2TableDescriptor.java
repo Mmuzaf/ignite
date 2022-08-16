@@ -28,12 +28,12 @@ import org.apache.ignite.internal.processors.cache.GridCacheContext;
 import org.apache.ignite.internal.processors.cache.GridCacheContextInfo;
 import org.apache.ignite.internal.processors.query.GridQueryIndexDescriptor;
 import org.apache.ignite.internal.processors.query.GridQueryProperty;
+import org.apache.ignite.internal.processors.query.GridQueryRowDescriptor;
 import org.apache.ignite.internal.processors.query.GridQueryTypeDescriptor;
 import org.apache.ignite.internal.processors.query.QueryUtils;
 import org.apache.ignite.internal.processors.query.h2.database.H2PkHashIndex;
 import org.apache.ignite.internal.processors.query.h2.database.H2TreeIndexBase;
 import org.apache.ignite.internal.processors.query.h2.opt.GridH2IndexBase;
-import org.apache.ignite.internal.processors.query.h2.opt.GridH2RowDescriptor;
 import org.apache.ignite.internal.processors.query.h2.opt.GridH2Table;
 import org.apache.ignite.internal.processors.query.h2.opt.GridLuceneIndex;
 import org.apache.ignite.internal.processors.query.schema.SchemaIndexCacheVisitor;
@@ -239,7 +239,7 @@ public class H2TableDescriptor {
             false,
             unwrappedKeyAndAffinityCols,
             wrappedKeyCols,
-            -1,
+            tbl.rowDescriptor().type().primaryKeyInlineSize(),
             null
         );
 
@@ -304,7 +304,7 @@ public class H2TableDescriptor {
                     true,
                     colsWithUnwrappedKey,
                     cols,
-                    -1,
+                    tbl.rowDescriptor().type().affinityFieldInlineSize(),
                     null)
                 );
             }
@@ -402,7 +402,6 @@ public class H2TableDescriptor {
      * @param cacheVisitor Cache visitor.
      * @return Index.
      */
-    @SuppressWarnings("ZeroLengthArrayAllocation")
     public GridH2IndexBase createUserIndex(GridQueryIndexDescriptor idxDesc, @Nullable SchemaIndexCacheVisitor cacheVisitor) {
         IndexColumn keyCol = tbl.indexColumn(QueryUtils.KEY_COL, SortOrder.ASCENDING);
         IndexColumn affCol = tbl.getAffinityKeyColumn();
@@ -416,7 +415,7 @@ public class H2TableDescriptor {
                 idxDesc.descending(field) ? SortOrder.DESCENDING : SortOrder.ASCENDING));
         }
 
-        GridH2RowDescriptor desc = tbl.rowDescriptor();
+        GridQueryRowDescriptor desc = tbl.rowDescriptor();
 
         if (idxDesc.type() == QueryIndexType.SORTED) {
             List<IndexColumn> unwrappedKeyCols = extractKeyColumns(tbl, keyCol, affCol);

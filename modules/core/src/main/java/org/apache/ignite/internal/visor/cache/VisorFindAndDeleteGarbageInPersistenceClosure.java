@@ -188,10 +188,10 @@ public class VisorFindAndDeleteGarbageInPersistenceClosure implements IgniteCall
         }
     }
 
-   /**
-    * @param grpIds Group ids to generate list of partitions for.
-    */
-   private List<T2<CacheGroupContext, GridDhtLocalPartition>> calcListOfPartitions(Set<Integer> grpIds) {
+    /**
+     * @param grpIds Group ids to generate list of partitions for.
+     */
+    private List<T2<CacheGroupContext, GridDhtLocalPartition>> calcListOfPartitions(Set<Integer> grpIds) {
         List<T2<CacheGroupContext, GridDhtLocalPartition>> partArgs = new ArrayList<>();
 
         for (Integer grpId : grpIds) {
@@ -247,7 +247,7 @@ public class VisorFindAndDeleteGarbageInPersistenceClosure implements IgniteCall
             Collection<CacheGroupContext> groups = ignite.context().cache().cacheGroups();
 
             for (CacheGroupContext grp : groups) {
-                if (!grp.systemCache() && !grp.isLocal())
+                if (!grp.systemCache())
                     grpIds.add(grp.groupId());
             }
         }

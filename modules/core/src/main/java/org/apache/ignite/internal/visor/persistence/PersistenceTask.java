@@ -156,7 +156,8 @@ public class PersistenceTask extends VisorOneNodeTask<PersistenceTaskArg, Persis
                         copyCacheFiles(workDir.toPath().resolve(dir).toFile(), backupDir);
 
                         backupCompletedCaches.add(backupDirName);
-                    } catch (IgniteCheckedException | IOException e) {
+                    }
+                    catch (IgniteCheckedException | IOException e) {
                         backupFailedCaches.add(dir);
                     }
                 }
@@ -282,7 +283,8 @@ public class PersistenceTask extends VisorOneNodeTask<PersistenceTaskArg, Persis
 
             try {
                 cacheProc.cleanupCachesDirectories();
-            } catch (IgniteCheckedException e) {
+            }
+            catch (IgniteCheckedException e) {
                 throw U.convertException(e);
             }
 
@@ -330,8 +332,13 @@ public class PersistenceTask extends VisorOneNodeTask<PersistenceTaskArg, Persis
             GridCacheProcessor cacheProc = ignite.context().cache();
             DataStorageConfiguration dsCfg = ignite.context().config().getDataStorageConfiguration();
 
-            List<String> corruptedCacheNames = corruptedCacheDirectories(ignite.context().maintenanceRegistry()
-                .activeMaintenanceTask(CORRUPTED_DATA_FILES_MNTC_TASK_NAME));
+            MaintenanceTask task = ignite.context().maintenanceRegistry()
+                .activeMaintenanceTask(CORRUPTED_DATA_FILES_MNTC_TASK_NAME);
+
+            if (task == null)
+                return res;
+
+            List<String> corruptedCacheNames = corruptedCacheDirectories(task);
 
             Map<String, IgniteBiTuple<Boolean, Boolean>> cachesInfo = new HashMap<>();
 

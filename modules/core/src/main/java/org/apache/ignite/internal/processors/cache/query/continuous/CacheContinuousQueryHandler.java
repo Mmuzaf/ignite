@@ -52,6 +52,7 @@ import org.apache.ignite.internal.IgniteInternalFuture;
 import org.apache.ignite.internal.cluster.ClusterTopologyCheckedException;
 import org.apache.ignite.internal.managers.communication.GridIoPolicy;
 import org.apache.ignite.internal.managers.deployment.GridDeploymentInfo;
+import org.apache.ignite.internal.managers.deployment.P2PClassLoadingIssues;
 import org.apache.ignite.internal.processors.affinity.AffinityTopologyVersion;
 import org.apache.ignite.internal.processors.cache.GridCacheAdapter;
 import org.apache.ignite.internal.processors.cache.GridCacheAffinityManager;
@@ -422,21 +423,21 @@ public class CacheContinuousQueryHandler<K, V> implements GridContinuousHandler 
             @Override public void onBeforeRegister() {
                 GridCacheContext<K, V> cctx = cacheContext(ctx);
 
-                if (cctx != null && !cctx.isLocal())
+                if (cctx != null)
                     cctx.topology().readLock();
             }
 
             @Override public void onAfterRegister() {
                 GridCacheContext<K, V> cctx = cacheContext(ctx);
 
-                if (cctx != null && !cctx.isLocal())
+                if (cctx != null)
                     cctx.topology().readUnlock();
             }
 
             @Override public void onRegister() {
                 GridCacheContext<K, V> cctx = cacheContext(ctx);
 
-                if (cctx != null && !cctx.isLocal())
+                if (cctx != null)
                     locInitUpdCntrs = toCountersMap(cctx.topology().localUpdateCounters(false));
             }
 
@@ -586,7 +587,8 @@ public class CacheContinuousQueryHandler<K, V> implements GridContinuousHandler 
                                 @Override public void run() {
                                     try {
                                         notifyLocalListener(evts, getTransformer());
-                                    } catch (IgniteCheckedException ex) {
+                                    }
+                                    catch (IgniteCheckedException ex) {
                                         U.error(ctx.log(CU.CONTINUOUS_QRY_LOG_CATEGORY),
                                             "Failed to notify local listener.", ex);
                                     }
@@ -598,7 +600,8 @@ public class CacheContinuousQueryHandler<K, V> implements GridContinuousHandler 
                                 @Override public void run() {
                                     try {
                                         notifyLocalListener(evts, getTransformer());
-                                    } catch (IgniteCheckedException ex) {
+                                    }
+                                    catch (IgniteCheckedException ex) {
                                         U.error(ctx.log(CU.CONTINUOUS_QRY_LOG_CATEGORY),
                                             "Failed to notify local listener.", ex);
                                     }
@@ -678,7 +681,7 @@ public class CacheContinuousQueryHandler<K, V> implements GridContinuousHandler 
                 assert !skipEvt || evt == null;
                 assert skipEvt || part == -1 && cntr == -1; // part == -1 && cntr == -1 means skip counter.
 
-                if (!cctx.mvccEnabled() || cctx.isLocal())
+                if (!cctx.mvccEnabled())
                     return true;
 
                 assert locInitUpdCntrs != null;
@@ -854,14 +857,12 @@ public class CacheContinuousQueryHandler<K, V> implements GridContinuousHandler 
     void waitTopologyFuture(GridKernalContext ctx) throws IgniteCheckedException {
         GridCacheContext<K, V> cctx = cacheContext(ctx);
 
-        if (!cctx.isLocal()) {
-            AffinityTopologyVersion topVer = initTopVer;
+        AffinityTopologyVersion topVer = initTopVer;
 
-            cacheContext(ctx).shared().exchange().affinityReadyFuture(topVer).get();
+        cacheContext(ctx).shared().exchange().affinityReadyFuture(topVer).get();
 
-            for (int partId = 0; partId < cacheContext(ctx).affinity().partitions(); partId++)
-                getOrCreatePartitionRecovery(ctx, partId, topVer);
-        }
+        for (int partId = 0; partId < cacheContext(ctx).affinity().partitions(); partId++)
+            getOrCreatePartitionRecovery(ctx, partId, topVer);
     }
 
     /** {@inheritDoc} */
@@ -1036,6 +1037,9 @@ public class CacheContinuousQueryHandler<K, V> implements GridContinuousHandler 
         try {
             if (notify && getEventFilter() != null)
                 notify = getEventFilter().evaluate(evt);
+        }
+        catch (NoClassDefFoundError e) {
+            P2PClassLoadingIssues.rethrowDisarmedP2PClassLoadingFailure(e);
         }
         catch (Exception e) {
             U.error(log, "CacheEntryEventFilter failed: " + e);
@@ -1623,6 +1627,9 @@ public class CacheContinuousQueryHandler<K, V> implements GridContinuousHandler 
 
         try {
             transVal = trans.apply(evt);
+        }
+        catch (NoClassDefFoundError e) {
+            P2PClassLoadingIssues.rethrowDisarmedP2PClassLoadingFailure(e);
         }
         catch (Exception e) {
             U.error(log, e);

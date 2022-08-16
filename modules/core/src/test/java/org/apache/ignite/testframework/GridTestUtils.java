@@ -65,12 +65,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Collectors;
 import javax.cache.CacheException;
 import javax.cache.configuration.Factory;
 import javax.management.Attribute;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
+import com.google.common.collect.Lists;
 import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteCache;
 import org.apache.ignite.IgniteCheckedException;
@@ -101,6 +103,7 @@ import org.apache.ignite.internal.util.future.GridFutureAdapter;
 import org.apache.ignite.internal.util.lang.GridAbsClosure;
 import org.apache.ignite.internal.util.lang.GridAbsPredicate;
 import org.apache.ignite.internal.util.lang.IgnitePair;
+import org.apache.ignite.internal.util.lang.RunnableX;
 import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.internal.util.typedef.G;
 import org.apache.ignite.internal.util.typedef.T2;
@@ -110,7 +113,6 @@ import org.apache.ignite.internal.util.typedef.internal.U;
 import org.apache.ignite.lang.IgniteFuture;
 import org.apache.ignite.lang.IgniteInClosure;
 import org.apache.ignite.lang.IgnitePredicate;
-import org.apache.ignite.lang.IgniteRunnable;
 import org.apache.ignite.plugin.extensions.communication.Message;
 import org.apache.ignite.spi.discovery.DiscoveryNotification;
 import org.apache.ignite.spi.discovery.DiscoverySpiCustomMessage;
@@ -369,7 +371,8 @@ public final class GridTestUtils {
     public static void assertNotContains(@Nullable IgniteLogger log, String str, String substr) {
         try {
             assertFalse(str.contains(substr));
-        } catch (AssertionError e) {
+        }
+        catch (AssertionError e) {
             U.warn(log, String.format("String contain substring: '%s', but shouldn't:", substr));
             U.warn(log, "String:");
             U.warn(log, str);
@@ -389,7 +392,8 @@ public final class GridTestUtils {
     public static void assertContains(@Nullable IgniteLogger log, String str, String substr) {
         try {
             assertTrue(str != null && str.contains(substr));
-        } catch (AssertionError e) {
+        }
+        catch (AssertionError e) {
             U.warn(log, String.format("String does not contain substring: '%s':", substr));
             U.warn(log, "String:");
             U.warn(log, str);
@@ -409,7 +413,8 @@ public final class GridTestUtils {
     public static <C extends Collection<T>, T> void assertContains(@Nullable IgniteLogger log, C col, T elem) {
         try {
             assertTrue(col.contains(elem));
-        } catch (AssertionError e) {
+        }
+        catch (AssertionError e) {
             U.warn(log, String.format("Collection does not contain: '%s':", elem));
             U.warn(log, "Collection:");
             U.warn(log, col);
@@ -429,7 +434,8 @@ public final class GridTestUtils {
     public static <C extends Collection<T>, T> void assertNotContains(@Nullable IgniteLogger log, C col, T elem) {
         try {
             assertFalse(col.contains(elem));
-        } catch (AssertionError e) {
+        }
+        catch (AssertionError e) {
             U.warn(log, String.format("Collection contain element: '%s' but shouldn't:", elem));
             U.warn(log, "Collection:");
             U.warn(log, col);
@@ -1099,7 +1105,8 @@ public final class GridTestUtils {
         try {
             for (Thread t : threads)
                 t.join();
-        } catch (InterruptedException e) {
+        }
+        catch (InterruptedException e) {
             for (Thread t : threads)
                 t.interrupt();
 
@@ -1960,11 +1967,30 @@ public final class GridTestUtils {
      * @return {@code true} if condition was achieved, {@code false} otherwise.
      * @throws org.apache.ignite.internal.IgniteInterruptedCheckedException If interrupted.
      */
-    public static boolean waitForCondition(GridAbsPredicate cond, long timeout) throws IgniteInterruptedCheckedException {
+    public static boolean waitForCondition(
+        GridAbsPredicate cond,
+        long timeout
+    ) throws IgniteInterruptedCheckedException {
+        return waitForCondition(cond, timeout, DFLT_BUSYWAIT_SLEEP_INTERVAL);
+    }
+
+    /**
+     * Waits for condition, polling in busy wait loop.
+     *
+     * @param cond Condition to wait for.
+     * @param timeout Max time to wait in milliseconds.
+     * @return {@code true} if condition was achieved, {@code false} otherwise.
+     * @throws org.apache.ignite.internal.IgniteInterruptedCheckedException If interrupted.
+     */
+    public static boolean waitForCondition(
+        GridAbsPredicate cond,
+        long timeout,
+        long checkInterval
+    ) throws IgniteInterruptedCheckedException {
         long endTime = U.currentTimeMillis() + timeout;
         long endTime0 = endTime < 0 ? Long.MAX_VALUE : endTime;
 
-        return waitForCondition(cond, () -> U.currentTimeMillis() < endTime0);
+        return waitForCondition(cond, () -> U.currentTimeMillis() < endTime0, checkInterval);
     }
 
     /**
@@ -1973,12 +1999,30 @@ public final class GridTestUtils {
      * @return {@code true} if condition was achieved, {@code false} otherwise.
      * @throws IgniteInterruptedCheckedException If interrupted.
      */
-    public static boolean waitForCondition(GridAbsPredicate cond, BooleanSupplier wait) throws IgniteInterruptedCheckedException {
+    public static boolean waitForCondition(
+        GridAbsPredicate cond,
+        BooleanSupplier wait
+    ) throws IgniteInterruptedCheckedException {
+        return waitForCondition(cond, wait, DFLT_BUSYWAIT_SLEEP_INTERVAL);
+    }
+
+    /**
+     * @param cond Condition to wait for.
+     * @param wait Wait predicate.
+     * @return {@code true} if condition was achieved, {@code false} otherwise.
+     * @param checkInterval Time interval between two consecutive condition checks.
+     * @throws IgniteInterruptedCheckedException If interrupted.
+     */
+    public static boolean waitForCondition(
+        GridAbsPredicate cond,
+        BooleanSupplier wait,
+        long checkInterval
+    ) throws IgniteInterruptedCheckedException {
         while (wait.getAsBoolean()) {
             if (cond.apply())
                 return true;
 
-            U.sleep(DFLT_BUSYWAIT_SLEEP_INTERVAL);
+            U.sleep(checkInterval);
         }
 
         return false;
@@ -2363,6 +2407,13 @@ public final class GridTestUtils {
         assertFalse(state + " isn't inactive state", state.active());
     }
 
+    /** @return Cartesian product of collections. See {@link Lists#cartesianProduct(List)}. */
+    public static Collection<Object[]> cartesianProduct(Collection<?>... c) {
+        List<List<?>> lists = F.asList(c).stream().map(ArrayList::new).collect(Collectors.toList());
+
+        return F.transform(Lists.cartesianProduct(lists), List::toArray);
+    }
+
     /** Test parameters scale factor util. */
     private static class ScaleFactorUtil {
         /** Test speed scale factor property name. */
@@ -2539,52 +2590,6 @@ public final class GridTestUtils {
             can_fail();
 
             return sleep;
-        }
-    }
-
-    /**
-     * Runnable that can throw exceptions.
-     */
-    @FunctionalInterface
-    public interface RunnableX extends Runnable {
-        /**
-         * Runnable body.
-         *
-         * @throws Exception If failed.
-         */
-        void runx() throws Exception;
-
-        /** {@inheritdoc} */
-        @Override default void run() {
-            try {
-                runx();
-            }
-            catch (Exception e) {
-                throw new IgniteException(e);
-            }
-        }
-    }
-
-    /**
-     * IgniteRunnable that can throw exceptions.
-     */
-    @FunctionalInterface
-    public interface IgniteRunnableX extends IgniteRunnable {
-        /**
-         * Runnable body.
-         *
-         * @throws Exception If failed.
-         */
-        void runx() throws Exception;
-
-        /** {@inheritdoc} */
-        @Override default void run() {
-            try {
-                runx();
-            }
-            catch (Exception e) {
-                throw new IgniteException(e);
-            }
         }
     }
 

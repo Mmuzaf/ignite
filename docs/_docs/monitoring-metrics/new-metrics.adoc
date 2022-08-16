@@ -218,6 +218,7 @@ Register name: `threadPools.{thread_pool_name}`
 |RejectedExecutionHandlerClass|   string | Class name of current rejection handler.
 |Shutdown  |  boolean| True if this executor has been shut down.
 |TaskCount |  long |   Approximate total number of tasks that have been scheduled for execution.
+|TaskExecutionTime | histogram | Task execution time, in milliseconds.
 |Terminated  |boolean| True if all tasks have completed following shut down.
 |Terminating |long|    True if terminating but not yet terminated.
 |ThreadFactoryClass|  string|  Class name of thread factory used to create new threads.
@@ -451,4 +452,18 @@ Register name: `cluster`
 |TotalBaselineNodes| integer | Total baseline nodes count.
 |TotalClientNodes| integer | Client nodes count.
 |TotalServerNodes| integer | Server nodes count.
+|===
+
+== Cache processor
+
+Cache processor metrics.
+
+Register name: `cache`
+
+
+[cols="2,1,3",opts="header"]
+|===
+|Name|    Type|    Description
+|LastDataVer| long | The latest data version on the node.
+|DataVersionClusterId| integer | Data version cluster id.
 |===

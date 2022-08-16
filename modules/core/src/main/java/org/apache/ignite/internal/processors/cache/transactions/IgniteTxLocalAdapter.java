@@ -847,9 +847,8 @@ public abstract class IgniteTxLocalAdapter extends IgniteTxAdapter implements Ig
                                 else if (op == READ) {
                                     CacheGroupContext grp = cacheCtx.group();
 
-                                    if (grp.persistenceEnabled() && grp.walEnabled() &&
-                                        cctx.snapshot().needTxReadLogging()) {
-                                        ptr = cctx.wal().log(new DataRecord(new DataEntry(
+                                    if (grp.logDataRecords() && cctx.snapshot().needTxReadLogging()) {
+                                        ptr = grp.wal().log(new DataRecord(new DataEntry(
                                             cacheCtx.cacheId(),
                                             txEntry.key(),
                                             val,
@@ -924,7 +923,7 @@ public abstract class IgniteTxLocalAdapter extends IgniteTxAdapter implements Ig
                 cctx.mvccCaching().onTxFinished(this, true);
 
                 if (ptr != null)
-                    cctx.wal().flush(ptr, false);
+                    cctx.wal(true).flush(ptr, false);
             }
             catch (Throwable ex) {
                 // We are about to initiate transaction rollback when tx has started to committing.
@@ -1202,15 +1201,11 @@ public abstract class IgniteTxLocalAdapter extends IgniteTxAdapter implements Ig
                     if (retval || invoke) {
                         if (!cacheCtx.isNear()) {
                             if (!hasPrevVal) {
-                                // For non-local cache should read from store after lock on primary.
-                                boolean readThrough = cacheCtx.isLocal() &&
-                                    (invoke || cacheCtx.loadPreviousValue()) &&
-                                    !txEntry.skipStore();
-
+                                // For caches, we should read from store after lock on primary.
                                 v = cached.innerGet(
                                     null,
                                     this,
-                                    readThrough,
+                                    false,
                                     /*metrics*/!invoke,
                                     /*event*/!invoke && !dht(),
                                     null,
@@ -1314,8 +1309,8 @@ public abstract class IgniteTxLocalAdapter extends IgniteTxAdapter implements Ig
     protected final void addInvokeResult(IgniteTxEntry txEntry,
         CacheObject cacheVal,
         GridCacheReturn ret,
-        GridCacheVersion ver)
-    {
+        GridCacheVersion ver
+    ) {
         GridCacheContext ctx = txEntry.context();
 
         Object key0 = null;
